@@ -13,7 +13,9 @@
     "react": "^18",
     "react-dom": "^18",
     "framer-motion": "^11.3.19",
-    "lucide-react": "^0.417.0"
+    "lucide-react": "^0.417.0",
+    "openai": "^4.0.0",
+    "@supabase/supabase-js": "^2.0.0"
   },
   "devDependencies": {
     "typescript": "^5",

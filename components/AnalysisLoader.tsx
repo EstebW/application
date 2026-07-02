@@ -1,53 +1,86 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ProgressBar from './ProgressBar'
+import type { CelebrityResult } from '@/lib/types'
+import { callFunction } from '@/lib/functions'
 
 const STEPS = [
-  'Analyse des traits de ton visage...',
+  'Détection des points clés de ton visage...',
   'Comparaison avec 10 000 célébrités...',
-  'Calcul du pourcentage de ressemblance...',
-  'Ton jumeau a été trouvé !',
+  'Calcul de la ressemblance exacte...',
+  'Ton jumeau vient d\'être trouvé !',
 ]
 
 interface AnalysisLoaderProps {
   preview: string
-  onComplete: () => void
+  imageBase64: string
+  sessionId?: string
+  onComplete: (result: CelebrityResult & { analysisId?: string }) => void
 }
 
-export default function AnalysisLoader({ preview, onComplete }: AnalysisLoaderProps) {
+export default function AnalysisLoader({ preview, imageBase64, sessionId, onComplete }: AnalysisLoaderProps) {
   const [stepIndex, setStepIndex] = useState(0)
   const [progress, setProgress] = useState(0)
+  const [apiError, setApiError] = useState('')
+  const called = useRef(false)
 
   useEffect(() => {
-    const totalDuration = 4000
-    const stepDuration = totalDuration / STEPS.length
+    if (called.current) return
+    called.current = true
 
-    const stepTimer = setInterval(() => {
-      setStepIndex((prev) => {
-        if (prev < STEPS.length - 1) return prev + 1
-        clearInterval(stepTimer)
-        return prev
-      })
-    }, stepDuration)
-
-    const progressTimer = setInterval(() => {
+    // Progress bar animation — min 4 seconds UX
+    const progressInterval = setInterval(() => {
       setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(progressTimer)
-          return 100
-        }
-        return prev + 1.2
+        // Slow down near 90% until API responds
+        if (prev >= 90) return prev
+        return prev + 1.5
       })
-    }, totalDuration / 85)
+    }, 60)
 
-    const completeTimer = setTimeout(onComplete, totalDuration + 300)
+    // Step text cycling
+    const stepInterval = setInterval(() => {
+      setStepIndex((prev) => Math.min(prev + 1, STEPS.length - 2))
+    }, 1100)
+
+    // Minimum display time before transitioning
+    const MIN_MS = 3800
+
+    const t0 = Date.now()
+
+    callFunction<CelebrityResult & { analysisId?: string; error?: string }>(
+      'analyze',
+      { imageBase64, sessionId }
+    )
+      .then((data) => {
+        clearInterval(stepInterval)
+
+        if (data.error) {
+          throw new Error(data.error)
+        }
+
+        const elapsed = Date.now() - t0
+        const remaining = Math.max(0, MIN_MS - elapsed)
+
+        // Show final step + fill bar, then transition
+        setStepIndex(STEPS.length - 1)
+
+        setTimeout(() => {
+          clearInterval(progressInterval)
+          setProgress(100)
+          setTimeout(() => onComplete(data), 600)
+        }, remaining)
+      })
+      .catch((err: unknown) => {
+        clearInterval(progressInterval)
+        clearInterval(stepInterval)
+        setApiError(err instanceof Error ? err.message : 'Erreur inconnue')
+      })
 
     return () => {
-      clearInterval(stepTimer)
-      clearInterval(progressTimer)
-      clearTimeout(completeTimer)
+      clearInterval(progressInterval)
+      clearInterval(stepInterval)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -72,7 +105,6 @@ export default function AnalysisLoader({ preview, onComplete }: AnalysisLoaderPr
 
       {/* Animated photo with spinning arcs */}
       <div className="relative w-52 h-52 flex items-center justify-center">
-        {/* Outer spinning arc */}
         <motion.div
           className="absolute inset-0"
           animate={{ rotate: 360 }}
@@ -86,20 +118,11 @@ export default function AnalysisLoader({ preview, onComplete }: AnalysisLoaderPr
                 <stop offset="100%" stopColor="#F0D060" stopOpacity="0.3" />
               </linearGradient>
             </defs>
-            <circle
-              cx="100"
-              cy="100"
-              r="95"
-              fill="none"
-              stroke="url(#arcGrad1)"
-              strokeWidth="3"
-              strokeDasharray="200 400"
-              strokeLinecap="round"
-            />
+            <circle cx="100" cy="100" r="95" fill="none" stroke="url(#arcGrad1)"
+              strokeWidth="3" strokeDasharray="200 400" strokeLinecap="round" />
           </svg>
         </motion.div>
 
-        {/* Inner counter-spinning arc */}
         <motion.div
           className="absolute"
           style={{ inset: '14px' }}
@@ -114,63 +137,36 @@ export default function AnalysisLoader({ preview, onComplete }: AnalysisLoaderPr
                 <stop offset="100%" stopColor="#6B21A8" stopOpacity="0" />
               </linearGradient>
             </defs>
-            <circle
-              cx="100"
-              cy="100"
-              r="95"
-              fill="none"
-              stroke="url(#arcGrad2)"
-              strokeWidth="2"
-              strokeDasharray="120 480"
-              strokeLinecap="round"
-            />
+            <circle cx="100" cy="100" r="95" fill="none" stroke="url(#arcGrad2)"
+              strokeWidth="2" strokeDasharray="120 480" strokeLinecap="round" />
           </svg>
         </motion.div>
 
-        {/* Scan line effect */}
+        {/* Scan line */}
         <motion.div
-          className="absolute left-0 right-0 h-0.5 z-20 overflow-hidden"
-          style={{ top: '50%' }}
+          className="absolute left-0 right-0 h-0.5 z-20"
           animate={{ top: ['15%', '85%', '15%'] }}
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
         >
-          <div
-            className="w-full h-full"
-            style={{
-              background: 'linear-gradient(90deg, transparent, rgba(212,175,55,0.8), transparent)',
-            }}
-          />
+          <div className="w-full h-full"
+            style={{ background: 'linear-gradient(90deg, transparent, rgba(212,175,55,0.8), transparent)' }} />
         </motion.div>
 
         {/* Photo */}
-        <div
-          className="relative w-44 h-44 rounded-full overflow-hidden z-10"
-          style={{
-            border: '3px solid rgba(212,175,55,0.5)',
-            boxShadow: '0 0 30px rgba(212,175,55,0.2)',
-          }}
+        <div className="relative w-44 h-44 rounded-full overflow-hidden z-10"
+          style={{ border: '3px solid rgba(212,175,55,0.5)', boxShadow: '0 0 30px rgba(212,175,55,0.2)' }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={preview} alt="Analyse" className="w-full h-full object-cover" />
-          {/* Scan overlay */}
-          <div
-            className="absolute inset-0"
-            style={{
-              background: 'linear-gradient(to bottom, transparent 30%, rgba(212,175,55,0.08) 50%, transparent 70%)',
-            }}
-          />
         </div>
 
-        {/* Corner dots */}
         {[
           { top: '5%', left: '5%' },
           { top: '5%', right: '5%' },
           { bottom: '5%', left: '5%' },
           { bottom: '5%', right: '5%' },
         ].map((pos, i) => (
-          <motion.div
-            key={i}
-            className="absolute w-2 h-2 rounded-full bg-[#D4AF37]"
+          <motion.div key={i} className="absolute w-2 h-2 rounded-full bg-[#D4AF37]"
             style={pos}
             animate={{ opacity: [1, 0.2, 1], scale: [1, 0.7, 1] }}
             transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.3 }}
@@ -180,45 +176,54 @@ export default function AnalysisLoader({ preview, onComplete }: AnalysisLoaderPr
 
       {/* Step text */}
       <div className="w-full space-y-5">
-        <div className="h-10 flex items-center justify-center">
-          <AnimatePresence mode="wait">
-            <motion.p
-              key={stepIndex}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.4 }}
-              className={`text-center font-semibold text-base ${
-                stepIndex === STEPS.length - 1 ? 'text-[#D4AF37]' : 'text-white'
-              }`}
-            >
-              {STEPS[stepIndex]}
-            </motion.p>
-          </AnimatePresence>
-        </div>
+        {apiError ? (
+          <div className="text-center space-y-3">
+            <p className="text-red-400 text-sm font-semibold">Erreur lors de l'analyse</p>
+            <p className="text-[#808080] text-xs leading-relaxed max-w-xs mx-auto">
+              Vérifie que <code className="text-[#D4AF37]">KIE_API_KEY</code> est bien définie dans
+              les secrets de ton projet Supabase → Edge Functions → Secrets
+            </p>
+            {process.env.NODE_ENV === 'development' && (
+              <p className="text-[#555] text-xs font-mono break-all px-2">{apiError}</p>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="h-10 flex items-center justify-center">
+              <AnimatePresence mode="wait">
+                <motion.p
+                  key={stepIndex}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.4 }}
+                  className={`text-center font-semibold text-base ${
+                    stepIndex === STEPS.length - 1 ? 'text-[#D4AF37]' : 'text-white'
+                  }`}
+                >
+                  {STEPS[stepIndex]}
+                </motion.p>
+              </AnimatePresence>
+            </div>
 
-        {/* Steps dots */}
-        <div className="flex items-center justify-center gap-2">
-          {STEPS.map((_, i) => (
-            <motion.div
-              key={i}
-              className="rounded-full"
-              animate={{
-                width: i === stepIndex ? 24 : 6,
-                backgroundColor: i <= stepIndex ? '#D4AF37' : '#2A2A2A',
-              }}
-              style={{ height: 6 }}
-              transition={{ duration: 0.3 }}
-            />
-          ))}
-        </div>
+            <div className="flex items-center justify-center gap-2">
+              {STEPS.map((_, i) => (
+                <motion.div key={i} className="rounded-full"
+                  animate={{ width: i === stepIndex ? 24 : 6, backgroundColor: i <= stepIndex ? '#D4AF37' : '#2A2A2A' }}
+                  style={{ height: 6 }}
+                  transition={{ duration: 0.3 }}
+                />
+              ))}
+            </div>
 
-        <ProgressBar progress={Math.min(progress, 100)} />
+            <ProgressBar progress={Math.min(progress, 100)} />
 
-        <div className="flex justify-between text-xs text-[#555]">
-          <span>Progression</span>
-          <span>{Math.min(Math.round(progress), 100)}%</span>
-        </div>
+            <div className="flex justify-between text-xs text-[#555]">
+              <span>Progression</span>
+              <span>{Math.min(Math.round(progress), 100)}%</span>
+            </div>
+          </>
+        )}
       </div>
     </motion.div>
   )

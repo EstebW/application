@@ -2,16 +2,21 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Lock, Download, RefreshCw, Share2, Crown } from 'lucide-react'
+import { Lock, RefreshCw, Crown } from 'lucide-react'
 import GoldParticles from './GoldParticles'
+import type { CelebrityResult } from '@/lib/types'
 
 interface FinalResultProps {
+  celebrity: CelebrityResult
+  generatedImage: string
   onReset: () => void
+  onPay: () => void
 }
 
-export default function FinalResult({ onReset }: FinalResultProps) {
+export default function FinalResult({ celebrity, generatedImage, onReset, onPay }: FinalResultProps) {
   const [showParticles, setShowParticles] = useState(true)
-  const [timeLeft, setTimeLeft] = useState(600) // 10 minutes countdown
+  const [timeLeft, setTimeLeft] = useState(600)
+  const { name } = celebrity
 
   useEffect(() => {
     const timer = setTimeout(() => setShowParticles(false), 4000)
@@ -45,16 +50,14 @@ export default function FinalResult({ onReset }: FinalResultProps) {
       animate="visible"
       className="flex flex-col items-center gap-6 w-full"
     >
-      {/* Title */}
-      <motion.div variants={itemVariants} className="text-center space-y-1 relative">
+      <motion.div variants={itemVariants} className="text-center space-y-2 relative">
         <GoldParticles active={showParticles} />
-        <p className="text-[#D4AF37] text-xs uppercase tracking-widest font-bold">✨ Génération terminée</p>
+        <p className="text-[#D4AF37] text-xs uppercase tracking-widest font-bold">✨ Ta photo est prête</p>
         <h2
           className="text-4xl font-black text-white leading-tight"
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
         >
-          Ton jumeau
-          <br />
+          Toi avec{' '}
           <span
             style={{
               background: 'linear-gradient(135deg, #D4AF37, #F0D060)',
@@ -63,99 +66,134 @@ export default function FinalResult({ onReset }: FinalResultProps) {
               backgroundClip: 'text',
             }}
           >
-            célébrité est prêt !
+            {name}
           </span>
         </h2>
+        <p className="text-[#808080] text-sm">
+          L&apos;IA t&apos;a mis en scène aux côtés de {name} — débloque la version HD
+        </p>
       </motion.div>
 
-      {/* Generated image placeholder */}
       <motion.div variants={itemVariants} className="w-full relative">
-        {/* Outer gold glow */}
+        {/* Ambient glow behind the card */}
         <div
-          className="absolute inset-0 rounded-3xl blur-2xl"
-          style={{ background: 'radial-gradient(ellipse at center, rgba(212,175,55,0.25) 0%, transparent 70%)' }}
+          className="absolute inset-x-8 inset-y-4 rounded-3xl blur-3xl"
+          style={{ background: 'radial-gradient(ellipse at center, rgba(212,175,55,0.2) 0%, rgba(107,33,168,0.15) 60%, transparent 100%)' }}
         />
 
         <div
           className="relative w-full rounded-3xl overflow-hidden"
           style={{
-            aspectRatio: '9/16',
-            maxHeight: '480px',
-            border: '2px solid rgba(212,175,55,0.4)',
-            boxShadow: '0 0 60px rgba(212,175,55,0.2), 0 20px 60px rgba(0,0,0,0.6)',
+            aspectRatio: '4/3',
+            border: '2px solid rgba(212,175,55,0.35)',
+            boxShadow: '0 0 50px rgba(212,175,55,0.15), 0 16px 48px rgba(0,0,0,0.7)',
           }}
         >
-          {/* Blurred background image - mock gradient portrait */}
+          {/* Background: real generated image blurred, or gradient fallback */}
+          {generatedImage ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={generatedImage}
+                alt="Aperçu flouté"
+                className="absolute inset-0 w-full h-full object-cover"
+                style={{ filter: 'blur(18px)', transform: 'scale(1.08)' }}
+              />
+              <div className="absolute inset-0 bg-black/40" />
+            </>
+          ) : (
+            <>
+              <div
+                className="absolute inset-0"
+                style={{
+                  background: `
+                    radial-gradient(ellipse at 35% 40%, rgba(107,33,168,0.9) 0%, transparent 55%),
+                    radial-gradient(ellipse at 72% 60%, rgba(212,175,55,0.35) 0%, transparent 50%),
+                    linear-gradient(160deg, #1a0533 0%, #2d1b69 35%, #0f0f1a 65%, #1a1007 100%)
+                  `,
+                  filter: 'blur(22px)',
+                  transform: 'scale(1.1)',
+                }}
+              />
+              {/* Two silhouettes side by side */}
+              <div className="absolute inset-0 flex items-end justify-center gap-6 pb-4 opacity-20">
+                <div className="flex flex-col items-center gap-0">
+                  <div className="w-16 h-16 rounded-full bg-white/50" />
+                  <div className="w-24 h-20 rounded-t-3xl bg-white/30 mt-0.5" />
+                </div>
+                <div className="flex flex-col items-center gap-0">
+                  <div className="w-20 h-20 rounded-full bg-[#D4AF37]/60" />
+                  <div className="w-28 h-24 rounded-t-3xl bg-[#D4AF37]/30 mt-0.5" />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Blur overlay */}
+          <div className="absolute inset-0 backdrop-blur-lg" />
+
+          {/* Vignette — darken edges for depth */}
           <div
             className="absolute inset-0"
             style={{
-              background: `
-                radial-gradient(ellipse at 40% 30%, rgba(107,33,168,0.8) 0%, transparent 50%),
-                radial-gradient(ellipse at 70% 70%, rgba(212,175,55,0.3) 0%, transparent 50%),
-                linear-gradient(160deg, #1a0533 0%, #2d1b69 30%, #0f0f1a 60%, #1a1007 100%)
-              `,
-              filter: 'blur(18px)',
-              transform: 'scale(1.08)',
+              background: 'radial-gradient(ellipse at 50% 45%, transparent 30%, rgba(0,0,0,0.55) 100%)',
             }}
           />
 
-          {/* Fake portrait silhouette */}
-          <div className="absolute inset-0 flex flex-col items-center justify-center opacity-20">
-            <div className="w-36 h-36 rounded-full bg-white/30" />
-            <div className="w-52 h-40 rounded-t-full bg-white/15 mt-2" />
+          {/* Top-left badge */}
+          <div className="absolute top-3 left-3">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 border border-white/10 backdrop-blur-sm">
+              <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-pulse" />
+              <span className="text-white/70 text-[10px] font-semibold">Toi + {name}</span>
+            </div>
           </div>
 
-          {/* Heavy blur overlay */}
-          <div className="absolute inset-0 backdrop-blur-md" />
-
-          {/* Grain texture overlay */}
-          <div
-            className="absolute inset-0 opacity-30"
-            style={{
-              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E")`,
-            }}
-          />
-
-          {/* HD Version badge */}
-          <div className="absolute top-4 right-4">
+          {/* Top-right HD badge */}
+          <div className="absolute top-3 right-3">
             <motion.div
               animate={{ scale: [1, 1.05, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+              transition={{ duration: 2.5, repeat: Infinity }}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full backdrop-blur-sm"
               style={{
-                background: 'linear-gradient(135deg, #D4AF37, #F0D060)',
-                boxShadow: '0 4px 15px rgba(212,175,55,0.4)',
+                background: 'linear-gradient(135deg, rgba(212,175,55,0.9), rgba(240,208,96,0.9))',
               }}
             >
-              <Crown size={11} className="text-black" />
-              <span className="text-black text-xs font-black">Version HD</span>
+              <Crown size={9} className="text-black" />
+              <span className="text-black text-[10px] font-black">HD</span>
             </motion.div>
           </div>
 
-          {/* Lock icon center */}
-          <div className="absolute inset-0 flex items-center justify-center">
+          {/* Center lock CTA */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
             <motion.div
-              animate={{ scale: [1, 1.1, 1], opacity: [0.7, 1, 0.7] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              className="w-20 h-20 rounded-full bg-black/50 border border-white/20 flex items-center justify-center backdrop-blur-sm"
+              animate={{ scale: [1, 1.08, 1], opacity: [0.8, 1, 0.8] }}
+              transition={{ duration: 2.2, repeat: Infinity }}
+              className="w-16 h-16 rounded-2xl flex items-center justify-center backdrop-blur-sm"
+              style={{
+                background: 'rgba(0,0,0,0.6)',
+                border: '1.5px solid rgba(212,175,55,0.5)',
+                boxShadow: '0 0 24px rgba(212,175,55,0.2)',
+              }}
             >
-              <Lock size={28} className="text-[#D4AF37]" />
+              <Lock size={24} className="text-[#D4AF37]" />
             </motion.div>
+            <div
+              className="px-4 py-1.5 rounded-full text-xs font-bold text-black"
+              style={{ background: 'linear-gradient(135deg, #D4AF37, #F0D060)' }}
+            >
+              Voir la photo en HD
+            </div>
           </div>
 
-          {/* Watermark */}
-          <div className="absolute bottom-6 left-0 right-0 flex justify-center">
-            <p
-              className="text-white/25 text-xs font-bold tracking-widest uppercase select-none"
-              style={{ textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}
-            >
+          {/* Watermark bottom */}
+          <div className="absolute bottom-4 left-0 right-0 flex justify-center">
+            <p className="text-white/20 text-[10px] font-bold tracking-[0.2em] uppercase select-none">
               monjumeaucelèbre.com
             </p>
           </div>
         </div>
       </motion.div>
 
-      {/* Conversion block */}
       <motion.div variants={itemVariants} className="w-full">
         <div
           className="w-full rounded-3xl overflow-hidden"
@@ -164,53 +202,27 @@ export default function FinalResult({ onReset }: FinalResultProps) {
             border: '1px solid rgba(212,175,55,0.25)',
           }}
         >
-          {/* Top gradient bar */}
           <div
             className="h-1"
             style={{ background: 'linear-gradient(90deg, #6B21A8, #D4AF37, #F0D060, #D4AF37, #6B21A8)' }}
           />
 
           <div className="p-6 space-y-5">
-            {/* Countdown */}
-            <div className="flex items-center justify-center gap-2 py-2 px-4 rounded-2xl bg-[#D4AF37]/8 border border-[#D4AF37]/20">
-              <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse" />
-              <span className="text-[#D4AF37] text-sm font-bold">
-                Offre expirante dans {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
-              </span>
-            </div>
-
+            {/* 1. Titre + sous-titre */}
             <div className="text-center space-y-2">
               <h3 className="text-white text-xl font-black">
-                Débloque ta version HD sans watermark
+                Débloque ta photo avec {name}
               </h3>
               <p className="text-[#A0A0A0] text-sm">
-                Télécharge ton jumeau en haute résolution, sans filigrane
+                Sans watermark · télécharge-la et partage-la en un clic
               </p>
             </div>
 
-            {/* Features */}
-            <div className="grid grid-cols-2 gap-2.5">
-              {[
-                { icon: Download, text: 'Téléchargement immédiat' },
-                { icon: Crown, text: 'Résolution 4K' },
-                { icon: Lock, text: 'Sans watermark' },
-                { icon: Share2, text: 'Partage réseaux sociaux' },
-              ].map(({ icon: Icon, text }, i) => (
-                <div key={i} className="flex items-center gap-2 py-2 px-3 rounded-xl bg-[#2A2A2A]/60">
-                  <Icon size={13} className="text-[#D4AF37] flex-shrink-0" />
-                  <span className="text-white text-xs">{text}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Price */}
-            <div className="flex items-center justify-center gap-4">
-              <div className="text-center">
-                <p className="text-[#555] text-sm line-through">4,99€</p>
-                <p className="text-[#A0A0A0] text-xs">Prix normal</p>
-              </div>
-              <div className="text-center relative">
-                <div
+            {/* 2. Prix + urgence intégrée */}
+            <div className="text-center space-y-1">
+              <div className="flex items-baseline justify-center gap-3">
+                <span className="text-[#555] text-base line-through">4,99€</span>
+                <span
                   className="text-4xl font-black"
                   style={{
                     background: 'linear-gradient(135deg, #D4AF37, #F0D060)',
@@ -220,35 +232,39 @@ export default function FinalResult({ onReset }: FinalResultProps) {
                   }}
                 >
                   1,99€
-                </div>
-                <div className="px-2 py-0.5 rounded bg-red-500/20 border border-red-500/40 -mt-1">
-                  <p className="text-red-400 text-[10px] font-bold">-60% AUJOURD&apos;HUI</p>
-                </div>
+                </span>
               </div>
+              <p className="text-xs text-[#A0A0A0]">
+                Offre limitée · expire dans{' '}
+                <span className="text-[#D4AF37] font-semibold tabular-nums">
+                  {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+                </span>
+              </p>
             </div>
 
-            {/* CTA button with pulse */}
+            {/* 3. CTA */}
             <motion.button
-              className="btn-gold btn-pulse w-full py-5 rounded-2xl text-xl font-black tracking-wide flex items-center justify-center gap-2"
+              onClick={onPay}
+              className="btn-gold btn-pulse w-full py-5 rounded-2xl text-xl font-black tracking-wide"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
               style={{ boxShadow: '0 8px 40px rgba(212, 175, 55, 0.45)' }}
             >
-              <Crown size={20} />
-              Débloquer en HD — 1,99€ →
+              Débloquer ma version HD →
             </motion.button>
 
-            <div className="flex items-center justify-center gap-2 text-[#A0A0A0] text-xs">
-              <Lock size={11} />
-              <span>Paiement sécurisé • Téléchargement immédiat</span>
+            {/* 4. Réassurance courte */}
+            <div className="flex items-center justify-center gap-1.5 text-[#A0A0A0] text-xs">
+              <Lock size={11} className="flex-shrink-0" />
+              <span>Paiement sécurisé · Accès immédiat</span>
             </div>
 
-            {/* Trust badges */}
-            <div className="flex justify-center gap-4 pt-1">
+            {/* 5. Logos de paiement discrets */}
+            <div className="flex items-center justify-center gap-3 opacity-40">
               {['Visa', 'Mastercard', 'Apple Pay', 'PayPal'].map((brand) => (
                 <div
                   key={brand}
-                  className="px-2 py-1 rounded bg-[#2A2A2A] text-[#555] text-[9px] font-bold"
+                  className="px-2 py-0.5 rounded bg-[#2A2A2A] text-[#888] text-[8px] font-bold tracking-wide"
                 >
                   {brand}
                 </div>
@@ -258,7 +274,6 @@ export default function FinalResult({ onReset }: FinalResultProps) {
         </div>
       </motion.div>
 
-      {/* Reset */}
       <motion.button
         variants={itemVariants}
         onClick={onReset}

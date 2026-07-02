@@ -93,15 +93,10 @@ html, body {
 }
 .ticker-track:hover { animation-play-state: paused; }
 
-/* ── Grain overlay ── */
-.grain::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
-  pointer-events: none;
-  z-index: 9999;
-  opacity: 0.35;
+/* Marquee fade edges — applied on overflow-hidden scroll container */
+.marquee-mask {
+  mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
 }
 
 /* ── Diagonal lines pattern ── */
@@ -115,40 +110,3 @@ html, body {
   );
 }
 
-/* ── Upload zone dashed gold border ── */
-.upload-dashed {
-  background-image:
-    repeating-linear-gradient(0deg,   rgba(212,175,55,0.4), rgba(212,175,55,0.4) 8px, transparent 8px, transparent 16px),
-    repeating-linear-gradient(90deg,  rgba(212,175,55,0.4), rgba(212,175,55,0.4) 8px, transparent 8px, transparent 16px),
-    repeating-linear-gradient(180deg, rgba(212,175,55,0.4), rgba(212,175,55,0.4) 8px, transparent 8px, transparent 16px),
-    repeating-linear-gradient(270deg, rgba(212,175,55,0.4), rgba(212,175,55,0.4) 8px, transparent 8px, transparent 16px);
-  background-size: 2px 100%, 100% 2px, 2px 100%, 100% 2px;
-  background-position: 0 0, 0 0, 100% 0, 0 100%;
-  background-repeat: no-repeat;
-}
-
-/* ── Arc spinner ── */
-@keyframes arcSpin { to { transform: rotate(360deg); } }
-.arc-spinner { animation: arcSpin 1.6s linear infinite; }
-
-/* ── Blur preview ── */
-.blur-preview {
-  filter: blur(18px);
-  transform: scale(1.06);
-}
-
-/* ── Animated underline ── */
-.animated-underline {
-  position: relative;
-}
-.animated-underline::after {
-  content: '';
-  position: absolute;
-  bottom: -4px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, #D4AF37, #F0D060, #D4AF37);
-  animation: shimmerBtn 3s linear infinite;
-  background-size: 250% auto;
-}

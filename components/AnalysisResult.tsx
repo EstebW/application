@@ -4,28 +4,18 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Check, RefreshCw, Sparkles } from 'lucide-react'
 import GoldParticles from './GoldParticles'
-
-const TRAITS = [
-  'Structure des pommettes',
-  'Forme des yeux',
-  'Ligne de mâchoire',
-]
-
-const MOCK_RESULT = {
-  name: 'Zendaya',
-  score: 87,
-  description:
-    'Comme Zendaya, ton visage dégage une présence naturellement magnétique et expressive.',
-}
+import type { CelebrityResult } from '@/lib/types'
 
 interface AnalysisResultProps {
   preview: string
+  celebrity: CelebrityResult
   onGenerate: () => void
   onReset: () => void
 }
 
-export default function AnalysisResult({ preview, onGenerate, onReset }: AnalysisResultProps) {
+export default function AnalysisResult({ preview, celebrity, onGenerate, onReset }: AnalysisResultProps) {
   const [showParticles, setShowParticles] = useState(true)
+  const { name, celebrity_domain, score, traits, fun_fact } = celebrity
 
   useEffect(() => {
     const timer = setTimeout(() => setShowParticles(false), 3500)
@@ -51,7 +41,9 @@ export default function AnalysisResult({ preview, onGenerate, onReset }: Analysi
     >
       {/* Title */}
       <motion.div variants={itemVariants} className="text-center space-y-1">
-        <p className="text-[#A0A0A0] text-xs uppercase tracking-widest font-semibold">Résultat de ton analyse</p>
+        <p className="text-[#A0A0A0] text-xs uppercase tracking-widest font-semibold">
+          Résultat de ton analyse
+        </p>
         <h2
           className="text-4xl font-black text-white"
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
@@ -72,7 +64,6 @@ export default function AnalysisResult({ preview, onGenerate, onReset }: Analysi
             boxShadow: '0 0 60px rgba(212,175,55,0.1), inset 0 1px 0 rgba(212,175,55,0.1)',
           }}
         >
-          {/* Top gold stripe */}
           <div
             className="h-1 w-full"
             style={{ background: 'linear-gradient(90deg, #A88B20, #D4AF37, #F0D060, #D4AF37, #A88B20)' }}
@@ -92,39 +83,27 @@ export default function AnalysisResult({ preview, onGenerate, onReset }: Analysi
                 <span className="text-[10px] text-[#A0A0A0]">Toi</span>
               </div>
 
-              {/* VS connector */}
-              <div className="flex flex-col items-center gap-1">
-                <motion.div
-                  animate={{ scale: [1, 1.2, 1], opacity: [0.7, 1, 0.7] }}
-                  transition={{ duration: 1.5, repeat: Infinity }}
-                >
-                  <Sparkles size={20} className="text-[#D4AF37]" />
-                </motion.div>
-                <div
-                  className="px-2 py-0.5 rounded-full text-[10px] font-black text-black"
-                  style={{ background: 'linear-gradient(135deg, #D4AF37, #F0D060)' }}
-                >
-                  {MOCK_RESULT.score}%
-                </div>
-              </div>
+              <motion.div
+                animate={{ scale: [1, 1.2, 1], opacity: [0.7, 1, 0.7] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+              >
+                <Sparkles size={20} className="text-[#D4AF37]" />
+              </motion.div>
 
               <div className="flex flex-col items-center gap-2">
-                {/* Celeb placeholder */}
                 <div
                   className="w-20 h-20 rounded-full overflow-hidden relative"
                   style={{ border: '2px solid rgba(212,175,55,0.5)' }}
                 >
                   <div
                     className="w-full h-full"
-                    style={{
-                      background: 'linear-gradient(135deg, #2d1b69, #6B21A8)',
-                    }}
+                    style={{ background: 'linear-gradient(135deg, #2d1b69, #6B21A8)' }}
                   />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-2xl font-black text-white/30">Z</span>
+                    <span className="text-2xl font-black text-white/30">{name[0]}</span>
                   </div>
                 </div>
-                <span className="text-[10px] text-[#A0A0A0]">Zendaya</span>
+                <span className="text-[10px] text-[#A0A0A0]">{name}</span>
               </div>
             </div>
 
@@ -136,35 +115,45 @@ export default function AnalysisResult({ preview, onGenerate, onReset }: Analysi
                 style={{
                   fontFamily: "'Playfair Display', Georgia, serif",
                   background: 'linear-gradient(135deg, #D4AF37 0%, #F0D060 40%, #D4AF37 100%)',
+                  backgroundSize: '200% auto',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   backgroundClip: 'text',
                 }}
-                animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
-                transition={{ duration: 4, repeat: Infinity }}
+                animate={{ backgroundPosition: ['0% center', '200% center'] }}
+                transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
               >
-                {MOCK_RESULT.name}
+                {name}
               </motion.h3>
 
-              {/* Score badge */}
+              {celebrity_domain && (
+                <p className="text-[#808080] text-xs uppercase tracking-widest font-semibold">
+                  {celebrity_domain}
+                </p>
+              )}
+
               <motion.div
                 className="inline-flex items-center gap-2 px-5 py-2 rounded-full"
                 style={{ background: 'linear-gradient(135deg, #D4AF37, #F0D060)' }}
                 animate={{ boxShadow: ['0 0 0 0 rgba(212,175,55,0.5)', '0 0 0 8px rgba(212,175,55,0)', '0 0 0 0 rgba(212,175,55,0.5)'] }}
                 transition={{ duration: 2, repeat: Infinity }}
               >
-                <span className="text-black font-black text-xl">{MOCK_RESULT.score}%</span>
+                <span className="text-black font-black text-xl">{score}%</span>
                 <span className="text-black/70 font-semibold text-sm">de ressemblance</span>
               </motion.div>
+
+              {score >= 85 && (
+                <p className="text-[#D4AF37]/80 text-xs font-medium pt-1">
+                  Ressemblance rarissime — moins de 3% des visages analysés dépassent 85%
+                </p>
+              )}
             </div>
 
-            {/* Divider */}
             <div className="h-px bg-gradient-to-r from-transparent via-[#D4AF37]/30 to-transparent" />
 
-            {/* Common traits */}
             <div className="space-y-2.5">
               <p className="text-[#A0A0A0] text-xs uppercase tracking-widest">Traits communs détectés</p>
-              {TRAITS.map((trait, i) => (
+              {traits.map((trait, i) => (
                 <motion.div
                   key={i}
                   initial={{ opacity: 0, x: -20 }}
@@ -180,31 +169,40 @@ export default function AnalysisResult({ preview, onGenerate, onReset }: Analysi
               ))}
             </div>
 
-            {/* Description */}
-            <p className="text-[#A0A0A0] text-sm text-center leading-relaxed italic">
-              &ldquo;{MOCK_RESULT.description}&rdquo;
-            </p>
+            {fun_fact && (
+              <p className="text-[#A0A0A0] text-sm text-center leading-relaxed italic">
+                &ldquo;{fun_fact}&rdquo;
+              </p>
+            )}
           </div>
         </div>
       </motion.div>
 
-      {/* CTA */}
+      {/* CTA block */}
       <motion.div variants={itemVariants} className="w-full space-y-3">
+        {/* Teaser label */}
+        <div className="text-center">
+          <p className="text-[#A0A0A0] text-sm">
+            Et si tu te retrouvais sur une photo
+            <span className="text-[#D4AF37] font-semibold"> aux côtés de {name} ?</span>
+          </p>
+        </div>
+
         <motion.button
           onClick={onGenerate}
-          className="btn-gold w-full py-5 rounded-2xl text-lg font-black tracking-wide"
+          className="btn-gold btn-pulse w-full py-5 rounded-2xl text-lg font-black tracking-wide"
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          style={{ boxShadow: '0 8px 40px rgba(212, 175, 55, 0.35)' }}
+          style={{ boxShadow: '0 8px 40px rgba(212,175,55,0.35)' }}
         >
-          Générer mon jumeau {MOCK_RESULT.name} →
+          Me voir avec {name} →
         </motion.button>
 
         <button
           onClick={onReset}
-          className="w-full flex items-center justify-center gap-2 text-[#A0A0A0] hover:text-[#D4AF37] transition-colors py-2 text-sm"
+          className="w-full flex items-center justify-center gap-2 text-[#606060] hover:text-[#D4AF37] transition-colors py-2 text-sm"
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={13} />
           Réessayer avec une autre photo
         </button>
       </motion.div>

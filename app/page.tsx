@@ -9,17 +9,59 @@ import AnalysisLoader from '@/components/AnalysisLoader'
 import AnalysisResult from '@/components/AnalysisResult'
 import GenerationLoader from '@/components/GenerationLoader'
 import FinalResult from '@/components/FinalResult'
+import PaymentScreen from '@/components/PaymentScreen'
+import SuccessScreen from '@/components/SuccessScreen'
+import SignupGate from '@/components/SignupGate'
+import Stepper from '@/components/Stepper'
 import StarField from '@/components/StarField'
+import { useEffect, useRef } from 'react'
+import type { CelebrityResult } from '@/lib/types'
+import { callFunction } from '@/lib/functions'
 
-type Step = 'hero' | 'upload' | 'analyzing' | 'result' | 'generating' | 'final'
+type Step = 'hero' | 'upload' | 'analyzing' | 'signup' | 'result' | 'generating' | 'final' | 'payment' | 'success'
 
-const STEP_ORDER: Step[] = ['hero', 'upload', 'analyzing', 'result', 'generating', 'final']
+const STEP_ORDER: Step[] = ['hero', 'upload', 'analyzing', 'signup', 'result', 'generating', 'final', 'payment', 'success']
+
+function getStepperIndex(step: Step): number {
+  switch (step) {
+    case 'hero':
+    case 'upload':
+      return 0
+    case 'analyzing':
+    case 'signup':
+      return 1
+    case 'result':
+      return 2
+    case 'generating':
+    case 'final':
+    case 'payment':
+    case 'success':
+      return 3
+  }
+}
 
 export default function HomePage() {
   const [step, setStep] = useState<Step>('hero')
   const [photoPreview, setPhotoPreview] = useState<string>('')
+  const [celebrity, setCelebrity] = useState<CelebrityResult | null>(null)
+  const [generatedImage, setGeneratedImage] = useState<string>('')
+  const [sessionId, setSessionId] = useState<string>('')
+  const [analysisId, setAnalysisId] = useState<string>('')
+  const [generationId, setGenerationId] = useState<string>('')
+  const [userFirstName, setUserFirstName] = useState<string>('')
+  const sessionInitialized = useRef(false)
 
-  const handlePhotoSelected = useCallback((file: File, preview: string) => {
+  // Create Supabase session on mount
+  useEffect(() => {
+    if (sessionInitialized.current) return
+    sessionInitialized.current = true
+
+    callFunction<{ sessionId?: string }>('session')
+      .then((d) => { if (d.sessionId) setSessionId(d.sessionId) })
+      .catch(() => { /* non-blocking */ })
+  }, [])
+
+  const handlePhotoSelected = useCallback((_file: File, preview: string) => {
     setPhotoPreview(preview)
     setStep('upload')
   }, [])
@@ -28,7 +70,14 @@ export default function HomePage() {
     setStep('analyzing')
   }, [])
 
-  const handleAnalysisComplete = useCallback(() => {
+  const handleAnalysisComplete = useCallback((result: CelebrityResult & { analysisId?: string }) => {
+    setCelebrity(result)
+    if (result.analysisId) setAnalysisId(result.analysisId)
+    setStep('signup')   // ← Email gate before revealing the result
+  }, [])
+
+  const handleSignupComplete = useCallback((firstName: string) => {
+    setUserFirstName(firstName)
     setStep('result')
   }, [])
 
@@ -36,24 +85,43 @@ export default function HomePage() {
     setStep('generating')
   }, [])
 
-  const handleGenerationComplete = useCallback(() => {
+  const handleGenerationComplete = useCallback((imageBase64: string, genId?: string) => {
+    setGeneratedImage(imageBase64)
+    if (genId) setGenerationId(genId)
     setStep('final')
+  }, [])
+
+  const handlePay = useCallback(() => {
+    setStep('payment')
+  }, [])
+
+  const handlePaymentSuccess = useCallback(() => {
+    setStep('success')
   }, [])
 
   const handleReset = useCallback(() => {
     setPhotoPreview('')
+    setCelebrity(null)
+    setGeneratedImage('')
+    setAnalysisId('')
+    setGenerationId('')
+    setUserFirstName('')
     setStep('hero')
   }, [])
 
   const currentStepIndex = STEP_ORDER.indexOf(step)
-  const showBackButton = currentStepIndex > 0
+  const showBackButton =
+    currentStepIndex > 0 &&
+    step !== 'analyzing' &&
+    step !== 'generating' &&
+    step !== 'signup' &&   // can't skip the gate
+    step !== 'success'
 
   return (
     <div className="relative min-h-screen bg-[#0A0A0A] flex flex-col">
-      {/* Stars */}
       <StarField />
 
-      {/* Grain overlay — as a proper div, not ::after, to avoid pointer-events issues */}
+      {/* Grain overlay */}
       <div
         className="fixed inset-0 pointer-events-none"
         style={{
@@ -68,31 +136,20 @@ export default function HomePage() {
       <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden>
         <div
           className="absolute -top-32 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full"
-          style={{
-            background: 'radial-gradient(circle, rgba(212,175,55,0.06) 0%, transparent 65%)',
-            filter: 'blur(40px)',
-          }}
+          style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.06) 0%, transparent 65%)', filter: 'blur(40px)' }}
         />
         <div
           className="absolute top-1/2 -left-32 w-[350px] h-[350px] rounded-full"
-          style={{
-            background: 'radial-gradient(circle, rgba(107,33,168,0.07) 0%, transparent 65%)',
-            filter: 'blur(60px)',
-          }}
+          style={{ background: 'radial-gradient(circle, rgba(107,33,168,0.07) 0%, transparent 65%)', filter: 'blur(60px)' }}
         />
         <div
           className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full"
-          style={{
-            background: 'radial-gradient(circle, rgba(212,175,55,0.05) 0%, transparent 65%)',
-            filter: 'blur(70px)',
-          }}
+          style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.05) 0%, transparent 65%)', filter: 'blur(70px)' }}
         />
       </div>
 
       {/* ── Header ── */}
       <header className="relative z-20 flex items-center justify-between px-5 pt-5 pb-3">
-
-        {/* Back button placeholder / back btn */}
         <div className="w-9 h-9 flex items-center justify-center">
           <AnimatePresence>
             {showBackButton && (
@@ -102,10 +159,7 @@ export default function HomePage() {
                 exit={{ opacity: 0, scale: 0.7 }}
                 onClick={handleReset}
                 className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors"
-                style={{
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                }}
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
                 whileHover={{ borderColor: 'rgba(212,175,55,0.4)', scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
@@ -115,7 +169,6 @@ export default function HomePage() {
           </AnimatePresence>
         </div>
 
-        {/* Logo */}
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -141,36 +194,21 @@ export default function HomePage() {
           </span>
         </motion.div>
 
-        {/* Steps dots */}
-        <div className="flex items-center gap-1.5">
-          {(['hero', 'upload', 'result', 'final'] as Step[]).map((s) => {
-            const active = currentStepIndex >= STEP_ORDER.indexOf(s)
-            return (
-              <motion.div
-                key={s}
-                animate={{
-                  backgroundColor: active ? '#D4AF37' : '#222',
-                  width: active && STEP_ORDER.indexOf(s) === currentStepIndex ? 16 : 6,
-                }}
-                className="h-1.5 rounded-full"
-                transition={{ duration: 0.4 }}
-              />
-            )
-          })}
-        </div>
+        <div className="w-9 h-9" />
       </header>
+
+      {/* ── Stepper ── */}
+      <div className="relative z-20 px-5 max-w-[390px] mx-auto w-full">
+        <Stepper currentStep={getStepperIndex(step)} />
+      </div>
 
       {/* ── Main ── */}
       <main className="relative z-10 flex-1 flex flex-col pb-10 pt-2 max-w-[390px] mx-auto w-full">
         <AnimatePresence mode="wait">
           {step === 'hero' && (
-            <motion.div
-              key="hero"
-              className="px-5"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0, y: -20, scale: 0.98 }}
-              transition={{ duration: 0.45 }}
+            <motion.div key="hero" className="px-5"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              exit={{ opacity: 0, y: -20, scale: 0.98 }} transition={{ duration: 0.45 }}
             >
               <HeroSection onPhotoSelected={handlePhotoSelected} />
             </motion.div>
@@ -188,29 +226,84 @@ export default function HomePage() {
 
           {step === 'analyzing' && (
             <motion.div key="analyzing" className="px-5">
-              <AnalysisLoader preview={photoPreview} onComplete={handleAnalysisComplete} />
+              <AnalysisLoader
+                preview={photoPreview}
+                imageBase64={photoPreview}
+                sessionId={sessionId}
+                onComplete={handleAnalysisComplete}
+              />
             </motion.div>
           )}
 
-          {step === 'result' && (
+          {step === 'signup' && celebrity && (
+            <motion.div key="signup" className="px-5"
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.5 }}
+            >
+              <SignupGate
+                score={celebrity.score}
+                sessionId={sessionId}
+                onSuccess={handleSignupComplete}
+              />
+            </motion.div>
+          )}
+
+          {step === 'result' && celebrity && (
             <motion.div key="result" className="px-5">
               <AnalysisResult
                 preview={photoPreview}
+                celebrity={celebrity}
                 onGenerate={handleGenerate}
                 onReset={handleReset}
               />
             </motion.div>
           )}
 
-          {step === 'generating' && (
+          {step === 'generating' && celebrity && (
             <motion.div key="generating" className="px-5">
-              <GenerationLoader preview={photoPreview} onComplete={handleGenerationComplete} />
+              <GenerationLoader
+                preview={photoPreview}
+                imageBase64={photoPreview}
+                celebrity={celebrity}
+                sessionId={sessionId}
+                analysisId={analysisId}
+                onComplete={handleGenerationComplete}
+              />
             </motion.div>
           )}
 
-          {step === 'final' && (
+          {step === 'final' && celebrity && (
             <motion.div key="final" className="px-5">
-              <FinalResult onReset={handleReset} />
+              <FinalResult
+                celebrity={celebrity}
+                generatedImage={generatedImage}
+                onReset={handleReset}
+                onPay={handlePay}
+              />
+            </motion.div>
+          )}
+
+          {step === 'payment' && celebrity && (
+            <motion.div key="payment" className="px-5">
+              <PaymentScreen
+                sessionId={sessionId}
+                generationId={generationId}
+                onSuccess={handlePaymentSuccess}
+                onBack={() => setStep('final')}
+              />
+            </motion.div>
+          )}
+
+          {step === 'success' && celebrity && (
+            <motion.div key="success" className="px-5">
+              <SuccessScreen
+                preview={photoPreview}
+                generatedImage={generatedImage}
+                celebrity={celebrity}
+                onReset={handleReset}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -218,8 +311,7 @@ export default function HomePage() {
 
       {/* ── Footer ── */}
       <footer className="relative z-10 text-center py-5 px-5">
-        <div
-          className="h-px w-full mb-4"
+        <div className="h-px w-full mb-4"
           style={{ background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent)' }}
         />
         <p className="text-[#383838] text-[11px] tracking-wide">
