@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion'
 import { Check } from 'lucide-react'
 
-const STEPS = ['Upload', 'Analyse', 'Résultat', 'Génération'] as const
+const STEPS = ['Photo', 'Analyse', 'Débloquer', 'Ta photo'] as const
 
 interface StepperProps {
   currentStep: number
