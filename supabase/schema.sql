@@ -17,8 +17,25 @@ create table if not exists sessions (
 -- Ajout des colonnes si la table existe déjà
 alter table sessions add column if not exists email      text;
 alter table sessions add column if not exists first_name text;
+alter table sessions add column if not exists user_id    uuid;
+alter table sessions add column if not exists credits_balance integer not null default 0;
+alter table sessions add column if not exists subscription_plan text;
+alter table sessions add column if not exists subscription_expires_at timestamptz;
 
 create index if not exists sessions_email_idx on sessions(email);
+create index if not exists sessions_user_id_idx on sessions(user_id);
+
+-- ── credit_transactions ─────────────────────────────────────────
+create table if not exists credit_transactions (
+  id           uuid primary key default gen_random_uuid(),
+  session_id   uuid not null references sessions(id) on delete cascade,
+  amount       integer not null,
+  reason       text not null check (reason in ('payment', 'generation', 'refund', 'bonus')),
+  reference_id uuid,
+  created_at   timestamptz default now()
+);
+
+create index if not exists credit_transactions_session_idx on credit_transactions(session_id);
 
 -- ── analyses ────────────────────────────────────────────────────
 -- Résultat de l'analyse de visage
@@ -43,6 +60,7 @@ create table if not exists generations (
   analysis_id    uuid references analyses(id) on delete set null,
   celebrity_name text not null,
   unlocked       boolean not null default false,
+  scene_summary  text,
   created_at     timestamptz default now()
 );
 
@@ -57,6 +75,8 @@ create table if not exists payments (
   amount_cents   integer not null,
   currency       text not null default 'EUR',
   method         text,   -- 'card' | 'apple' | 'paypal'
+  plan           text,   -- 'once' | 'weekly' | 'monthly'
+  credits_granted integer,
   status         text not null default 'pending'
                    check (status in ('pending', 'completed', 'failed')),
   created_at     timestamptz default now()
@@ -73,12 +93,15 @@ alter table sessions   enable row level security;
 alter table analyses   enable row level security;
 alter table generations enable row level security;
 alter table payments   enable row level security;
+alter table credit_transactions enable row level security;
 
 -- Politique : INSERT ouvert (la clé anon peut créer des lignes)
 create policy "insert_sessions"    on sessions    for insert with check (true);
 create policy "insert_analyses"    on analyses    for insert with check (true);
 create policy "insert_generations" on generations for insert with check (true);
 create policy "insert_payments"    on payments    for insert with check (true);
+create policy "insert_credit_transactions" on credit_transactions for insert with check (true);
+create policy "select_credit_transactions" on credit_transactions for select using (true);
 
 -- Politique : SELECT uniquement sa propre session
 -- (les API routes utilisent service role et bypassent ces règles)

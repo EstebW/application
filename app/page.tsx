@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, Zap } from 'lucide-react'
+import { ArrowLeft, Zap, LogIn } from 'lucide-react'
+import Link from 'next/link'
 import HeroSection from '@/components/HeroSection'
 import PhotoUploadSection from '@/components/PhotoUploadSection'
 import AnalysisLoader from '@/components/AnalysisLoader'
@@ -14,8 +15,15 @@ import GenerationLoader from '@/components/GenerationLoader'
 import SuccessScreen from '@/components/SuccessScreen'
 import Stepper from '@/components/Stepper'
 import StarField from '@/components/StarField'
-import type { CelebrityResult, PhotoScene } from '@/lib/types'
+import type { CelebrityResult, GenerationRequest } from '@/lib/types'
 import { callFunction } from '@/lib/functions'
+import type { AccountData } from '@/lib/account'
+import {
+  getStoredSessionId,
+  setStoredSessionId,
+  setStoredEmail,
+  setHasCompletedGeneration,
+} from '@/lib/session-storage'
 
 // ── New funnel:
 // hero → upload → analyzing → teaser → signup → payment → customize → generating → success
@@ -53,17 +61,43 @@ export default function HomePage() {
   const [sessionId, setSessionId] = useState('')
   const [analysisId, setAnalysisId] = useState('')
   const [generationId, setGenerationId] = useState('')
-  const [photoScene, setPhotoScene] = useState<PhotoScene | null>(null)
+  const [generationRequest, setGenerationRequest] = useState<GenerationRequest | null>(null)
+  const [creditsBalance, setCreditsBalance] = useState(0)
   const sessionInitialized = useRef(false)
 
-  // Create Supabase session on mount
+  const refreshAccount = useCallback(async (sid: string) => {
+    try {
+      const data = await callFunction<AccountData>('account', { sessionId: sid })
+      setCreditsBalance(data.creditsBalance)
+      if (data.email) {
+        setStoredEmail(data.email)
+      }
+    } catch {
+      // compte pas encore migré ou session invalide
+    }
+  }, [])
+
+  // Create or restore Supabase session on mount
   useEffect(() => {
     if (sessionInitialized.current) return
     sessionInitialized.current = true
+
+    const stored = getStoredSessionId()
+    if (stored) {
+      setSessionId(stored)
+      refreshAccount(stored)
+      return
+    }
+
     callFunction<{ sessionId?: string }>('session')
-      .then((d) => { if (d.sessionId) setSessionId(d.sessionId) })
+      .then((d) => {
+        if (d.sessionId) {
+          setSessionId(d.sessionId)
+          setStoredSessionId(d.sessionId)
+        }
+      })
       .catch(() => { /* non-blocking */ })
-  }, [])
+  }, [refreshAccount])
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -80,18 +114,38 @@ export default function HomePage() {
     setStep('teaser')       // ← show blurred result first
   }, [])
 
-  const handleReveal = useCallback(() => setStep('signup'), [])
-
-  const handleSignupComplete = useCallback(() => {
-    setStep('payment')      // ← after signup → paywall
+  const handleReveal = useCallback(() => {
+    setStep('signup')
   }, [])
 
-  const handlePaymentSuccess = useCallback(() => {
+  const handleSignupComplete = useCallback((email?: string) => {
+    if (email) {
+      setStoredEmail(email)
+    }
+    if (creditsBalance > 0) {
+      setStep('customize')
+    } else {
+      setStep('payment')
+    }
+  }, [creditsBalance])
+
+  const handlePaymentSuccess = useCallback((newBalance?: number, creditsGranted?: number) => {
+    if (typeof newBalance === 'number') {
+      setCreditsBalance(newBalance)
+    } else if (typeof creditsGranted === 'number') {
+      setCreditsBalance((prev) => prev + creditsGranted)
+    } else if (sessionId) {
+      refreshAccount(sessionId)
+    }
     setStep('customize')
+  }, [sessionId, refreshAccount])
+
+  const handleInsufficientCredits = useCallback(() => {
+    setStep('payment')
   }, [])
 
-  const handleSceneSubmit = useCallback((scene: PhotoScene) => {
-    setPhotoScene(scene)
+  const handleSceneSubmit = useCallback((request: GenerationRequest) => {
+    setGenerationRequest(request)
     setStep('generating')
   }, [])
 
@@ -99,11 +153,14 @@ export default function HomePage() {
     setStep('customize')
   }, [])
 
-  const handleGenerationComplete = useCallback((imageBase64: string, genId?: string) => {
+  const handleGenerationComplete = useCallback((imageBase64: string, genId?: string, newBalance?: number) => {
     setGeneratedImage(imageBase64)
     if (genId) setGenerationId(genId)
+    if (typeof newBalance === 'number') setCreditsBalance(newBalance)
+    else if (sessionId) refreshAccount(sessionId)
+    setHasCompletedGeneration()
     setStep('success')
-  }, [])
+  }, [sessionId, refreshAccount])
 
   const handleReset = useCallback(() => {
     setPhotoPreview('')
@@ -111,7 +168,7 @@ export default function HomePage() {
     setGeneratedImage('')
     setAnalysisId('')
     setGenerationId('')
-    setPhotoScene(null)
+    setGenerationRequest(null)
     setStep('hero')
   }, [])
 
@@ -174,7 +231,16 @@ export default function HomePage() {
           </span>
         </motion.div>
 
-        <div className="w-9 h-9" />
+        <div className="flex items-center justify-end min-w-[72px]">
+          <Link
+            href="/login"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#A0A0A0' }}
+          >
+            <LogIn size={13} />
+            Connexion
+          </Link>
+        </div>
       </header>
 
       {/* ── Stepper ── */}
@@ -229,7 +295,7 @@ export default function HomePage() {
               <SignupGate
                 score={celebrity.score}
                 sessionId={sessionId}
-                onSuccess={handleSignupComplete}
+                onSuccess={(_firstName, email) => handleSignupComplete(email)}
               />
             </motion.div>
           )}
@@ -251,23 +317,26 @@ export default function HomePage() {
               variants={slideVariants} initial="enter" animate="center" exit="exit">
               <PhotoSceneCustomizer
                 celebrity={celebrity}
+                creditsBalance={creditsBalance}
                 onSubmit={handleSceneSubmit}
+                onNeedCredits={handleInsufficientCredits}
               />
             </motion.div>
           )}
 
-          {step === 'generating' && celebrity && photoScene && (
+          {step === 'generating' && celebrity && generationRequest && (
             <motion.div key="generating" className="px-5"
               variants={slideVariants} initial="enter" animate="center" exit="exit">
               <GenerationLoader
                 preview={photoPreview}
                 imageBase64={photoPreview}
                 celebrity={celebrity}
-                photoScene={photoScene}
+                generationRequest={generationRequest}
                 sessionId={sessionId}
                 analysisId={analysisId}
                 onComplete={handleGenerationComplete}
                 onRetry={handleBackToCustomize}
+                onInsufficientCredits={handleInsufficientCredits}
               />
             </motion.div>
           )}
@@ -279,6 +348,7 @@ export default function HomePage() {
                 preview={photoPreview}
                 generatedImage={generatedImage}
                 celebrity={celebrity}
+                creditsBalance={creditsBalance}
                 onReset={handleReset}
               />
             </motion.div>

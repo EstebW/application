@@ -4,12 +4,13 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, Lock, ChevronRight, Star } from 'lucide-react'
 import { callFunction } from '@/lib/functions'
-import type { CelebrityResult } from '@/lib/types'
+import { signUpWithEmail, signInWithEmail, formatAuthError } from '@/lib/auth'
+import { setStoredEmail } from '@/lib/session-storage'
 
 interface SignupGateProps {
   score: number
   sessionId?: string
-  onSuccess: (firstName: string) => void
+  onSuccess: (firstName: string, email: string) => void
 }
 
 const containerVariants = {
@@ -24,26 +25,44 @@ const up = {
 export default function SignupGate({ score, sessionId, onSuccess }: SignupGateProps) {
   const [firstName, setFirstName] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!email.trim()) { setError('Entre ton email pour continuer'); return }
+    if (password.length < 6) { setError('Le mot de passe doit contenir au moins 6 caractères'); return }
+    if (password !== confirmPassword) { setError('Les mots de passe ne correspondent pas'); return }
+
     setError('')
     setLoading(true)
 
     try {
+      const authData = await signUpWithEmail(email, password)
+      const user = authData.user
+      if (!user) throw new Error('Impossible de créer le compte')
+
+      // Si confirmation email désactivée, la session est créée directement
+      if (!authData.session) {
+        await signInWithEmail(email, password)
+      }
+
       if (sessionId) {
         await callFunction('register', {
           sessionId,
           email: email.trim(),
           firstName: firstName.trim() || undefined,
-        })
+          userId: user.id,
+        }).catch(() => null)
       }
-      onSuccess(firstName.trim() || 'toi')
+
+      setStoredEmail(email.trim())
+      onSuccess(firstName.trim() || 'toi', email.trim())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur, réessaie')
+      const message = err instanceof Error ? err.message : 'Erreur, réessaie'
+      setError(formatAuthError(message))
       setLoading(false)
     }
   }
@@ -58,10 +77,7 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
       animate="show"
       className="flex flex-col items-center gap-7 w-full"
     >
-      {/* ── Score reveal teaser ── */}
       <motion.div variants={up} className="w-full text-center space-y-4">
-
-        {/* Pulsing score badge */}
         <div className="flex justify-center">
           <motion.div
             animate={{
@@ -104,29 +120,13 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
             className="text-3xl font-black text-white leading-tight"
             style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
           >
-            Ton jumeau a été
-            <br />
-            <span
-              style={{
-                background: 'linear-gradient(135deg, #D4AF37, #F0D060)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-              }}
-            >
-              trouvé !
-            </span>
+            Crée ton compte
           </h2>
           <p className="text-[#808080] text-sm leading-relaxed">
-            {score >= 85
-              ? 'Ressemblance rarissime — tu fais partie du top 3%'
-              : 'Résultat analysé — révèle ta célébrité jumelle'}
-            <br />
-            Entre ton email pour découvrir qui c&apos;est.
+            Inscris-toi pour débloquer ton jumeau et générer ta photo.
           </p>
         </div>
 
-        {/* Stars rating mock */}
         <div className="flex items-center justify-center gap-1">
           {[...Array(5)].map((_, i) => (
             <Star key={i} size={13} className="text-[#D4AF37] fill-[#D4AF37]" />
@@ -135,12 +135,7 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
         </div>
       </motion.div>
 
-      {/* ── Form ── */}
-      <motion.form
-        variants={up}
-        onSubmit={handleSubmit}
-        className="w-full space-y-3"
-      >
+      <motion.form variants={up} onSubmit={handleSubmit} className="w-full space-y-3">
         <input
           type="text"
           placeholder="Ton prénom (optionnel)"
@@ -160,7 +155,26 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
           autoComplete="email"
         />
 
-        {/* Error */}
+        <input
+          type="password"
+          placeholder="Mot de passe (6 caractères min.) *"
+          value={password}
+          onChange={(e) => { setPassword(e.target.value); setError('') }}
+          className={inputClass}
+          required
+          autoComplete="new-password"
+        />
+
+        <input
+          type="password"
+          placeholder="Confirmer le mot de passe *"
+          value={confirmPassword}
+          onChange={(e) => { setConfirmPassword(e.target.value); setError('') }}
+          className={inputClass}
+          required
+          autoComplete="new-password"
+        />
+
         <AnimatePresence>
           {error && (
             <motion.p
@@ -174,7 +188,6 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
           )}
         </AnimatePresence>
 
-        {/* CTA */}
         <motion.button
           type="submit"
           disabled={loading}
@@ -183,59 +196,28 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
           whileTap={loading ? {} : { scale: 0.97 }}
           style={{ boxShadow: '0 8px 40px rgba(212,175,55,0.4)' }}
         >
-          <AnimatePresence mode="wait">
-            {loading ? (
-              <motion.span
-                key="loading"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex items-center gap-3"
-              >
-                <motion.div
-                  className="w-5 h-5 rounded-full border-2 border-black/40 border-t-black"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
-                />
-                Vérification…
-              </motion.span>
-            ) : (
-              <motion.span
-                key="submit"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex items-center gap-2"
-              >
-                Révéler mon jumeau
-                <ChevronRight size={20} className="flex-shrink-0" />
-              </motion.span>
-            )}
-          </AnimatePresence>
+          {loading ? (
+            <span className="flex items-center gap-3">
+              <motion.div
+                className="w-5 h-5 rounded-full border-2 border-black/40 border-t-black"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+              />
+              Création du compte…
+            </span>
+          ) : (
+            <span className="flex items-center gap-2">
+              Créer mon compte
+              <ChevronRight size={20} className="flex-shrink-0" />
+            </span>
+          )}
         </motion.button>
 
-        {/* Privacy */}
         <div className="flex items-center justify-center gap-1.5 text-[#505050] text-xs">
           <Lock size={11} className="flex-shrink-0" />
-          <span>Gratuit · Aucun spam · Données protégées</span>
+          <span>Tes données sont protégées · Aucun spam</span>
         </div>
       </motion.form>
-
-      {/* ── Social proof ── */}
-      <motion.div
-        variants={up}
-        className="w-full rounded-2xl p-4 text-center"
-        style={{
-          background: 'rgba(212,175,55,0.04)',
-          border: '1px solid rgba(212,175,55,0.12)',
-        }}
-      >
-        <p className="text-[#606060] text-xs leading-relaxed">
-          🔒 Ton email sert uniquement à accéder à ton résultat.
-          <br />
-          Tes photos ne sont jamais stockées.
-        </p>
-      </motion.div>
     </motion.div>
   )
 }

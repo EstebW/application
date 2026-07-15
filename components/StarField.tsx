@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 
 interface Star {
   id: number
@@ -28,7 +28,14 @@ function generateStars(count: number): Star[] {
 }
 
 export default function StarField() {
-  const stars = useMemo(() => generateStars(80), [])
+  const [stars, setStars] = useState<Star[]>([])
+
+  // Évite le mismatch SSR/client (Math.random différent côté serveur)
+  useEffect(() => {
+    setStars(generateStars(80))
+  }, [])
+
+  if (stars.length === 0) return null
 
   return (
     <div className="fixed inset-0 pointer-events-none" aria-hidden>

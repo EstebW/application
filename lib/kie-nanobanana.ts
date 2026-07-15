@@ -1,9 +1,10 @@
 import type { PhotoGenerationContext } from './types'
 import { buildPhotoPrompt } from './scene-suggestions'
 import { formatKieError } from './kie-errors'
+import { createServerClient } from './supabase'
 
 const KIE_API_BASE = 'https://api.kie.ai'
-const KIE_UPLOAD_BASE = 'https://kieai.redpandaai.co'
+const KIE_FILE_API_BASE = 'https://kieai.redpandaai.co'
 const POLL_INTERVAL_MS = 3000
 const POLL_TIMEOUT_MS = 90_000
 
@@ -23,6 +24,72 @@ function getExt(mime: string) {
   return 'jpg'
 }
 
+function base64ToBytes(base64: string): Uint8Array {
+  const raw = stripDataUrl(base64)
+  const bin = Buffer.from(raw, 'base64')
+  return new Uint8Array(bin)
+}
+
+function extractUploadUrl(data: {
+  fileUrl?: string
+  downloadUrl?: string
+} | undefined): string | undefined {
+  return data?.fileUrl ?? data?.downloadUrl
+}
+
+async function uploadToSupabaseStorage(imageBase64: string): Promise<string | null> {
+  try {
+    const db = createServerClient()
+    const mime = getMime(imageBase64)
+    const ext = getExt(mime)
+    const path = `refs/${crypto.randomUUID()}.${ext}`
+    const bytes = base64ToBytes(imageBase64)
+
+    const { error } = await db.storage.from('temp-images').upload(path, bytes, {
+      contentType: mime,
+      upsert: false,
+    })
+
+    if (error) {
+      console.warn('[generate] Supabase storage upload failed:', error.message)
+      return null
+    }
+
+    const { data } = db.storage.from('temp-images').getPublicUrl(path)
+    return data.publicUrl
+  } catch (err) {
+    console.warn('[generate] Supabase storage upload error:', err)
+    return null
+  }
+}
+
+async function uploadUrlToKie(fileUrl: string, apiKey: string): Promise<string | null> {
+  const res = await fetch(`${KIE_FILE_API_BASE}/api/file-url-upload`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      fileUrl,
+      uploadPath: 'mon-jumeau-celebre',
+      fileName: `ref-${Date.now()}.jpg`,
+    }),
+  })
+
+  const json = await res.json() as {
+    code?: number
+    msg?: string
+    data?: { fileUrl?: string; downloadUrl?: string }
+  }
+
+  const imageUrl = extractUploadUrl(json.data)
+  if (json.code === 200 && imageUrl) return imageUrl
+
+  console.warn('[generate] kie url upload failed:', JSON.stringify(json))
+  return null
+}
+
 async function uploadBase64ToKie(imageBase64: string, apiKey: string): Promise<string> {
   const mime = getMime(imageBase64)
   const ext = getExt(mime)
@@ -31,7 +98,7 @@ async function uploadBase64ToKie(imageBase64: string, apiKey: string): Promise<s
     ? imageBase64
     : `data:${mime};base64,${stripDataUrl(imageBase64)}`
 
-  const res = await fetch(`${KIE_UPLOAD_BASE}/api/file-base64-upload`, {
+  const res = await fetch(`${KIE_FILE_API_BASE}/api/file-base64-upload`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -45,19 +112,29 @@ async function uploadBase64ToKie(imageBase64: string, apiKey: string): Promise<s
   })
 
   const json = await res.json() as {
-    success?: boolean
     code?: number
     msg?: string
     data?: { fileUrl?: string; downloadUrl?: string }
   }
 
-  // Docs kie.ai : fileUrl = URL publique à passer dans image_input
-  const imageUrl = json.data?.fileUrl ?? json.data?.downloadUrl
+  const imageUrl = extractUploadUrl(json.data)
   if (!imageUrl || json.code !== 200) {
+    console.error('[generate] kie base64 upload failed:', JSON.stringify(json))
     throw new Error(`kie.ai upload: ${json.msg ?? 'URL manquante'} (code ${json.code ?? res.status})`)
   }
 
   return imageUrl
+}
+
+async function resolveReferenceImageUrl(imageBase64: string, apiKey: string): Promise<string> {
+  const publicUrl = await uploadToSupabaseStorage(imageBase64)
+  if (publicUrl) {
+    const kieUrl = await uploadUrlToKie(publicUrl, apiKey)
+    if (kieUrl) return kieUrl
+    return publicUrl
+  }
+
+  return uploadBase64ToKie(imageBase64, apiKey)
 }
 
 async function createTask(
@@ -135,7 +212,7 @@ export async function generateCelebrityPhoto(
   ctx: PhotoGenerationContext,
   apiKey: string
 ): Promise<string> {
-  const imageUrl = await uploadBase64ToKie(imageBase64, apiKey)
+  const imageUrl = await resolveReferenceImageUrl(imageBase64, apiKey)
   const taskId = await createTask(imageUrl, ctx, apiKey)
   const resultUrl = await pollTask(taskId, apiKey)
 

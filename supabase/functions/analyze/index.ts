@@ -5,14 +5,17 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const KIE_CLAUDE_URL = 'https://api.kie.ai/claude/v1/messages'
-const ANALYZE_MODEL = 'claude-opus-4-7'
+const KIE_API_BASE = 'https://api.kie.ai'
+const ANALYZE_MODEL = 'gemini-3-flash'
+const ANALYZE_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
 
-const ANALYZE_PROMPT = `Tu es un expert en analyse faciale et en culture pop mondiale.
+const ANALYZE_SYSTEM = `Tu es le moteur d'un jeu de divertissement nommé "Mon Jumeau Célèbre".
+Les joueurs uploadent une photo pour découvrir à quelle star ils ressemblent — c'est un jeu fun, pas une identification officielle.
+Tu dois toujours répondre par un objet JSON valide, sans markdown ni texte autour.`
 
-Analyse le visage sur cette photo et détermine à quelle célébrité mondiale connue cette personne ressemble le plus.
+const ANALYZE_PROMPT = `Analyse le visage sur cette photo et trouve la célébrité mondiale très connue à laquelle cette personne ressemble le plus (jeu de divertissement).
 
-Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans texte avant ou après :
+Réponds UNIQUEMENT avec un objet JSON valide :
 {
   "celebrity_name": "Prénom Nom",
   "celebrity_domain": "Acteur",
@@ -25,7 +28,7 @@ Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans texte avant o
 Règles :
 - similarity_percentage entre 65 et 95
 - célébrité très connue mondialement
-- si visage non visible : {"error":"visage non détecté"}`
+- si aucun visage visible : {"error":"visage non détecté"}`
 
 function toRawBase64(base64: string) {
   return base64.replace(/^data:image\/\w+;base64,/, '')
@@ -38,23 +41,18 @@ function getMime(base64: string): 'image/jpeg' | 'image/png' | 'image/webp' | 'i
   return 'image/jpeg'
 }
 
-function extractTextFromKieResponse(data: unknown): string {
+function toDataUrl(base64: string): string {
+  if (base64.startsWith('data:')) return base64
+  return `data:${getMime(base64)};base64,${toRawBase64(base64)}`
+}
+
+function extractTextFromResponse(data: unknown): string {
   if (!data || typeof data !== 'object') return ''
   const d = data as Record<string, unknown>
-  const content = d.content
-  if (Array.isArray(content)) {
-    const parts = content
-      .map((block) => {
-        if (!block || typeof block !== 'object') return ''
-        const b = block as { type?: string; text?: string }
-        if (b.type === 'text' && typeof b.text === 'string') return b.text
-        return ''
-      })
-      .filter(Boolean)
-    if (parts.length) return parts.join('\n')
-  }
+  const choices = d.choices as Array<{ message?: { content?: string } }> | undefined
+  if (choices?.[0]?.message?.content) return choices[0].message.content
   if (typeof d.text === 'string') return d.text
-  if (d.data && typeof d.data === 'object') return extractTextFromKieResponse(d.data)
+  if (d.data && typeof d.data === 'object') return extractTextFromResponse(d.data)
   return ''
 }
 
@@ -74,7 +72,44 @@ function extractJsonObject(text: string): Record<string, unknown> {
   if (start >= 0 && end > start) {
     return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>
   }
-  throw new Error('Impossible de parser la réponse de Claude')
+  throw new Error('Impossible de parser la réponse du modèle')
+}
+
+async function callKieVision(messages: unknown[], apiKey: string): Promise<string> {
+  const res = await fetch(`${KIE_API_BASE}${ANALYZE_ENDPOINT}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messages,
+      stream: false,
+      reasoning_effort: 'low',
+    }),
+  })
+
+  const bodyText = await res.text()
+  let data: unknown
+  try {
+    data = JSON.parse(bodyText)
+  } catch {
+    throw new Error(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${bodyText}`)
+  }
+
+  if (!res.ok) {
+    const err = data as { error?: { message?: string }; msg?: string }
+    throw new Error(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${err.error?.message ?? err.msg ?? bodyText}`)
+  }
+
+  const parsed = data as { code?: number; msg?: string }
+  if (typeof parsed.code === 'number' && parsed.code !== 200) {
+    throw new Error(`kie.ai ${ANALYZE_MODEL} — ${parsed.msg ?? 'erreur'}`)
+  }
+
+  const raw = extractTextFromResponse(data)
+  if (!raw) throw new Error('Réponse vide du modèle')
+  return raw
 }
 
 Deno.serve(async (req: Request) => {
@@ -93,51 +128,26 @@ Deno.serve(async (req: Request) => {
 
     if (!imageBase64) throw new Error('imageBase64 requis')
 
-    const kieRes = await fetch(KIE_CLAUDE_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${kieKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: ANALYZE_MODEL,
-        max_tokens: 600,
-        stream: false,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: getMime(imageBase64),
-                  data: toRawBase64(imageBase64),
-                },
-              },
-              { type: 'text', text: ANALYZE_PROMPT },
-            ],
-          },
-        ],
-      }),
-    })
+    const imageUrl = toDataUrl(imageBase64)
 
-    if (!kieRes.ok) {
-      const errBody = await kieRes.text()
-      throw new Error(`kie.ai Claude ${kieRes.status} — ${errBody}`)
-    }
+    const raw = await callKieVision(
+      [
+        { role: 'system', content: ANALYZE_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: ANALYZE_PROMPT },
+            { type: 'image_url', image_url: { url: imageUrl } },
+          ],
+        },
+      ],
+      kieKey
+    )
 
-    const kieData = await kieRes.json()
-    const raw = extractTextFromKieResponse(kieData)
-    if (!raw) {
-      console.error('[analyze] unexpected response:', JSON.stringify(kieData))
-      throw new Error('Réponse vide de Claude')
-    }
-
-    console.log('[analyze] Claude raw:', raw)
+    console.log(`[analyze] ${ANALYZE_MODEL} raw:`, raw)
 
     const parsed = extractJsonObject(raw)
-    if (typeof parsed.error === 'string') throw new Error(`Claude : ${parsed.error}`)
+    if (typeof parsed.error === 'string') throw new Error(`Analyse : ${parsed.error}`)
 
     const result = {
       name: typeof parsed.celebrity_name === 'string' ? parsed.celebrity_name : 'Célébrité inconnue',
@@ -171,7 +181,9 @@ Deno.serve(async (req: Request) => {
           .select('id')
           .single()
         analysisId = data?.id
-      } catch { /* non-blocking */ }
+      } catch (dbErr) {
+        console.warn('[analyze] DB insert failed:', dbErr)
+      }
     }
 
     return new Response(

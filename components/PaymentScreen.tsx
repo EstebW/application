@@ -4,12 +4,13 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Lock, ChevronRight, Check, Shield, Zap, Crown, TrendingDown, Flame } from 'lucide-react'
 import { callFunction } from '@/lib/functions'
+import { PLAN_CREDITS } from '@/lib/plans'
 
 interface PaymentScreenProps {
   sessionId?: string
   generationId?: string
   score?: number
-  onSuccess: () => void
+  onSuccess: (creditsBalance?: number, creditsGranted?: number) => void
 }
 
 type PayMethod = 'card' | 'apple' | 'paypal'
@@ -142,15 +143,20 @@ export default function PaymentScreen({ sessionId, generationId, score, onSucces
     setError('')
     setLoading(true)
 
+    const creditsGranted = PLAN_CREDITS[plan]
+
+    // Paiement simulé : toujours réussir après le délai.
+    // L'appel backend est optionnel (crédits réels quand Stripe + migration seront prêts).
     const logPayment = sessionId
-      ? callFunction('payment', { sessionId, generationId, method, plan }).catch(() => null)
+      ? callFunction<{ creditsBalance?: number }>('payment', { sessionId, generationId, method, plan })
+          .catch(() => null)
       : Promise.resolve(null)
 
     const delay = new Promise((r) => setTimeout(r, 2200))
 
-    Promise.all([logPayment, delay]).then(() => {
+    Promise.all([logPayment, delay]).then(([paymentResult]) => {
       setLoading(false)
-      onSuccess()
+      onSuccess(paymentResult?.creditsBalance, creditsGranted)
     })
   }
 

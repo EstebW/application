@@ -19,10 +19,25 @@ export interface PhotoScene {
   position: string
 }
 
+export type PhotoGenerationMode = 'presets' | 'custom'
+
+/** Choix utilisateur avant génération : scènes guidées ou prompt libre */
+export interface GenerationRequest {
+  mode: PhotoGenerationMode
+  photoScene?: PhotoScene
+  customPrompt?: string
+}
+
 /** Contexte complet transmis à Nano Banana 2 pour la génération */
 export interface PhotoGenerationContext {
   celebrityName: string
   celebrityDomain: string
   celebrityStyleDescription?: string
-  scene: PhotoScene
+  /** Traits de ressemblance issus de l'analyse */
+  traits?: string[]
+  /** Anecdote fun — aide à fixer l'ambiance */
+  funFact?: string
+  mode: PhotoGenerationMode
+  scene?: PhotoScene
+  customPrompt?: string
 }

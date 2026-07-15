@@ -123,31 +123,85 @@ export function getDefaultScene(celebrityDomain: string): PhotoScene {
 
 /** Nettoie le texte utilisateur pour limiter les blocages du filtre kie.ai */
 function sanitizeSceneText(text: string): string {
-  return text
-    .replace(/\s+/g, ' ')
-    .trim()
+  return text.replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * Prompt Nano Banana 2 — scènes guidées ou prompt libre utilisateur.
+ */
 export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
-  const { celebrityName, celebrityDomain, celebrityStyleDescription, scene } = ctx
+  const {
+    celebrityName,
+    celebrityDomain,
+    celebrityStyleDescription,
+    traits,
+    funFact,
+    mode,
+    scene,
+    customPrompt,
+  } = ctx
+
+  const domain = sanitizeSceneText(celebrityDomain)
+  const style = celebrityStyleDescription ? sanitizeSceneText(celebrityStyleDescription) : ''
+  const traitsLine = traits?.map(sanitizeSceneText).filter(Boolean).join(', ') ?? ''
+  const mood = funFact ? sanitizeSceneText(funFact) : ''
+
+  const subjectLines = [
+    '- Person A: the person from the reference image (preserve face identity and likeness).',
+    `- Person B: ${celebrityName}${domain ? `, known as a ${domain}` : ''}.`,
+    style ? `- Celebrity iconic look: ${style}.` : '',
+    traitsLine ? `- Shared visual traits / vibe: ${traitsLine}.` : '',
+    mood ? `- Scene mood / energy: ${mood}.` : '',
+  ]
+
+  const requirements = [
+    'REQUIREMENTS:',
+    '- Both faces clearly visible, natural expressions, magazine-quality lighting.',
+    '- Respect the user instructions — do not replace them with generic alternatives.',
+    '- Tasteful, family-friendly, public event photography.',
+  ]
+
+  if (mode === 'custom' && customPrompt) {
+    const userPrompt = sanitizeSceneText(customPrompt)
+    return [
+      'Photorealistic celebrity photo. Follow the USER PROMPT exactly — user instructions override any default styling.',
+      '',
+      'USER PROMPT (MANDATORY — must be clearly visible in the final image):',
+      userPrompt,
+      '',
+      'SUBJECTS:',
+      ...subjectLines,
+      '',
+      ...requirements,
+    ].filter(Boolean).join('\n')
+  }
+
+  if (!scene) {
+    throw new Error('photoScene requis en mode presets')
+  }
 
   const location = sanitizeSceneText(scene.location)
   const outfits = sanitizeSceneText(scene.outfits)
   const position = sanitizeSceneText(scene.position)
-  const domain = sanitizeSceneText(celebrityDomain)
-  const style = celebrityStyleDescription ? sanitizeSceneText(celebrityStyleDescription) : ''
 
-  // Prompt en anglais, ton éditorial — moins susceptible de déclencher le filtre « sensitive »
-  const parts = [
-    `Professional editorial event photograph, tasteful and family-friendly.`,
-    `Setting: ${location}.`,
-    domain ? `Event type / industry context: ${domain}.` : '',
-    `Wardrobe for both subjects: ${outfits}.`,
-    `Framing and pose: ${position}.`,
-    style ? `Visual mood and styling cues: ${style}.` : '',
-    `The photo features the person from the reference image alongside ${celebrityName} at a public event.`,
-    `Both subjects clearly visible, natural smiles, high-end magazine photography, cinematic lighting.`,
-  ]
-
-  return parts.filter(Boolean).join(' ')
+  return [
+    'Photorealistic celebrity event photo. Follow the USER SCENE BRIEF exactly — user choices override any default styling.',
+    '',
+    'USER SCENE BRIEF (MANDATORY — must be clearly visible in the final image):',
+    `1. LOCATION / SETTING: ${location}`,
+    `2. OUTFITS for both people: ${outfits}`,
+    `3. POSE and FRAMING: ${position}`,
+    '',
+    'SUBJECTS:',
+    ...subjectLines,
+    '',
+    ...requirements,
+  ].filter(Boolean).join('\n')
 }
+
+export const CUSTOM_PROMPT_EXAMPLES = [
+  'Photo sur un yacht à Monaco au coucher de soleil, tenues blanches élégantes, champagne à la main, sourires détendus.',
+  'Selfie backstage après un concert, looks streetwear luxe, lumières colorées et ambiance électrique.',
+  'Photo officielle sur le terrain après un match, maillots de l\'équipe, célébration de victoire bras levés.',
+  'Shooting magazine sur un rooftop new-yorkais la nuit, skyline en arrière-plan, tenues chic et pose confiante.',
+]

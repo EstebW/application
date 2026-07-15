@@ -1,7 +1,29 @@
 import { NextResponse } from 'next/server'
-import type { PhotoGenerationContext, PhotoScene } from '@/lib/types'
+import type { PhotoGenerationContext, PhotoGenerationMode, PhotoScene } from '@/lib/types'
 import { createServerClient } from '@/lib/supabase'
 import { generateCelebrityPhoto } from '@/lib/kie-nanobanana'
+
+function validateGenerationInput(body: {
+  generationMode?: PhotoGenerationMode
+  photoScene?: PhotoScene
+  customPrompt?: string
+}): Pick<PhotoGenerationContext, 'mode' | 'scene' | 'customPrompt'> {
+  const mode = body.generationMode ?? (body.customPrompt ? 'custom' : 'presets')
+
+  if (mode === 'custom') {
+    const prompt = body.customPrompt?.trim() ?? ''
+    if (prompt.length < 20) {
+      throw new Error('customPrompt requis (minimum 20 caractères)')
+    }
+    return { mode: 'custom', customPrompt: prompt }
+  }
+
+  const scene = body.photoScene
+  if (!scene?.location?.trim() || !scene?.outfits?.trim() || !scene?.position?.trim()) {
+    throw new Error('photoScene (lieu, tenues, position) requis')
+  }
+  return { mode: 'presets', scene }
+}
 
 async function callSupabaseGenerate(body: Record<string, unknown>) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -33,7 +55,11 @@ export async function POST(req: Request) {
       celebrityName: string
       celebrityDomain?: string
       celebrityStyleDescription?: string
+      celebrityTraits?: string[]
+      funFact?: string
+      generationMode?: PhotoGenerationMode
       photoScene?: PhotoScene
+      customPrompt?: string
       sessionId?: string
       analysisId?: string
     }
@@ -43,7 +69,8 @@ export async function POST(req: Request) {
       celebrityName,
       celebrityDomain,
       celebrityStyleDescription,
-      photoScene,
+      celebrityTraits,
+      funFact,
       sessionId,
       analysisId,
     } = body
@@ -55,18 +82,19 @@ export async function POST(req: Request) {
       )
     }
 
-    if (!photoScene?.location || !photoScene?.outfits || !photoScene?.position) {
-      return NextResponse.json(
-        { error: 'photoScene (lieu, tenues, position) requis' },
-        { status: 400 }
-      )
-    }
+    const generationInput = validateGenerationInput(body)
 
     const generationContext: PhotoGenerationContext = {
       celebrityName,
       celebrityDomain: celebrityDomain ?? '',
       celebrityStyleDescription: celebrityStyleDescription ?? '',
-      scene: photoScene,
+      traits: Array.isArray(celebrityTraits)
+        ? celebrityTraits.filter((t): t is string => typeof t === 'string')
+        : undefined,
+      funFact: typeof funFact === 'string' ? funFact : undefined,
+      mode: generationInput.mode,
+      scene: generationInput.scene,
+      customPrompt: generationInput.customPrompt,
     }
 
     const kieKey = process.env.KIE_API_KEY?.trim()
@@ -94,8 +122,8 @@ export async function POST(req: Request) {
             .select('id')
             .single()
           generationId = data?.id
-        } catch {
-          // non-blocking
+        } catch (dbErr) {
+          console.warn('[api/generate] DB insert failed:', dbErr instanceof Error ? dbErr.message : dbErr)
         }
       }
 

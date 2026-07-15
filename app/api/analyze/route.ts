@@ -58,8 +58,8 @@ export async function POST(req: Request) {
           .select('id')
           .single()
         analysisId = data?.id
-      } catch {
-        // non-blocking
+      } catch (dbErr) {
+        console.warn('[api/analyze] DB insert failed:', dbErr instanceof Error ? dbErr.message : dbErr)
       }
     }
 

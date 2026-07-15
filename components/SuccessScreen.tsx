@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Download, Share2, RefreshCw, Crown, Check } from 'lucide-react'
+import { Download, Share2, RefreshCw, Crown, Check, LayoutDashboard } from 'lucide-react'
 import GoldParticles from './GoldParticles'
 import type { CelebrityResult } from '@/lib/types'
 
@@ -10,10 +11,11 @@ interface SuccessScreenProps {
   preview: string
   generatedImage: string
   celebrity: CelebrityResult
+  creditsBalance?: number
   onReset: () => void
 }
 
-export default function SuccessScreen({ preview, generatedImage, celebrity, onReset }: SuccessScreenProps) {
+export default function SuccessScreen({ preview, generatedImage, celebrity, creditsBalance, onReset }: SuccessScreenProps) {
   const { name, score } = celebrity
   const [shared, setShared] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
@@ -229,6 +231,29 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, onRe
             Moins de 3% des gens dépassent 85% — tu fais partie de l&apos;élite
           </p>
         </div>
+      </motion.div>
+
+      {/* ── Crédits restants + espace ── */}
+      <motion.div variants={item} className="w-full flex flex-col gap-2">
+        {typeof creditsBalance === 'number' && (
+          <p className="text-center text-[#606060] text-xs">
+            Il te reste{' '}
+            <span className="text-[#D4AF37] font-bold">{creditsBalance} crédit{creditsBalance !== 1 ? 's' : ''}</span>
+            {' '}pour de nouvelles générations
+          </p>
+        )}
+        <Link
+          href="/dashboard"
+          className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold"
+          style={{
+            background: 'rgba(212,175,55,0.08)',
+            border: '1px solid rgba(212,175,55,0.25)',
+            color: '#D4AF37',
+          }}
+        >
+          <LayoutDashboard size={15} />
+          Mon espace · historique & crédits
+        </Link>
       </motion.div>
 
       {/* ── Recommencer ── */}

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles } from 'lucide-react'
 import ProgressBar from './ProgressBar'
-import type { CelebrityResult, PhotoScene } from '@/lib/types'
+import type { CelebrityResult, GenerationRequest } from '@/lib/types'
 import { callFunction } from '@/lib/functions'
 import { formatKieError, isSensitiveContentError } from '@/lib/kie-errors'
 
@@ -12,14 +12,15 @@ interface GenerationLoaderProps {
   preview: string
   imageBase64: string
   celebrity: CelebrityResult
-  photoScene: PhotoScene
+  generationRequest: GenerationRequest
   sessionId?: string
   analysisId?: string
-  onComplete: (imageBase64: string, generationId?: string) => void
+  onComplete: (imageBase64: string, generationId?: string, creditsBalance?: number) => void
   onRetry?: () => void
+  onInsufficientCredits?: () => void
 }
 
-export default function GenerationLoader({ preview, imageBase64, celebrity, photoScene, sessionId, analysisId, onComplete, onRetry }: GenerationLoaderProps) {
+export default function GenerationLoader({ preview, imageBase64, celebrity, generationRequest, sessionId, analysisId, onComplete, onRetry, onInsufficientCredits }: GenerationLoaderProps) {
   const { name, celebrity_domain, celebrity_style_description } = celebrity
   const [stepIndex, setStepIndex] = useState(0)
   const [progress, setProgress] = useState(0)
@@ -51,14 +52,18 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, phot
     const MIN_MS = 4000
     const t0 = Date.now()
 
-    callFunction<{ imageBase64?: string; generationId?: string; error?: string }>(
+    callFunction<{ imageBase64?: string; generationId?: string; creditsBalance?: number; error?: string }>(
       'generate',
       {
         imageBase64,
         celebrityName: name,
         celebrityDomain: celebrity_domain,
         celebrityStyleDescription: celebrity_style_description,
-        photoScene,
+        celebrityTraits: celebrity.traits,
+        funFact: celebrity.fun_fact,
+        generationMode: generationRequest.mode,
+        photoScene: generationRequest.photoScene,
+        customPrompt: generationRequest.customPrompt,
         sessionId,
         analysisId,
       }
@@ -78,14 +83,29 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, phot
         setTimeout(() => {
           clearInterval(progressInterval)
           setProgress(100)
-          setTimeout(() => onComplete(data.imageBase64!, data.generationId), 600)
+          setTimeout(() => onComplete(data.imageBase64!, data.generationId, data.creditsBalance), 600)
         }, remaining)
       })
       .catch((err: unknown) => {
         clearInterval(progressInterval)
         clearInterval(stepInterval)
         const raw = err instanceof Error ? err.message : 'Erreur inconnue'
-        setApiError(formatKieError(raw))
+        let message = raw
+        try {
+          const parsed = JSON.parse(raw) as { error?: string }
+          if (parsed.error) message = parsed.error
+        } catch {
+          // pas du JSON
+        }
+        const formatted = formatKieError(message)
+        setApiError(formatted)
+        if (
+          raw.includes('402') ||
+          message.toLowerCase().includes('insuffisants') ||
+          message.toLowerCase().includes('insufficient')
+        ) {
+          onInsufficientCredits?.()
+        }
       })
 
     return () => {
@@ -202,6 +222,20 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, phot
                 whileTap={{ scale: 0.98 }}
               >
                 Modifier la mise en scène
+              </motion.button>
+            )}
+            {(apiError.includes('insuffisants') || apiError.includes('Crédits')) && onInsufficientCredits && (
+              <motion.button
+                onClick={onInsufficientCredits}
+                className="mt-2 px-5 py-2.5 rounded-xl text-sm font-semibold"
+                style={{
+                  background: 'linear-gradient(135deg,#D4AF37,#F0D060)',
+                  color: '#0A0A0A',
+                }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                Acheter des crédits
               </motion.button>
             )}
             {process.env.NODE_ENV === 'development' && !isSensitiveContentError(apiError) && (

@@ -191,7 +191,7 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, onComp
       <div className="w-full space-y-5">
         {apiError ? (
           <div className="text-center space-y-3">
-            <p className="text-red-400 text-sm font-semibold">Erreur lors de l'analyse</p>
+            <p className="text-red-400 text-sm font-semibold">Erreur lors de l&apos;analyse</p>
             <p className="text-[#A0A0A0] text-xs leading-relaxed max-w-xs mx-auto">
               {apiError}
             </p>

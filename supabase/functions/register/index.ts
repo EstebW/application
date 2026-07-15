@@ -23,9 +23,10 @@ Deno.serve(async (req: Request) => {
       sessionId?: string
       email?: string
       firstName?: string
+      userId?: string
     }
 
-    const { sessionId, email, firstName } = body
+    const { sessionId, email, firstName, userId } = body
 
     // Validate required fields — only return 400 for client errors
     if (!email?.trim()) {
@@ -57,6 +58,7 @@ Deno.serve(async (req: Request) => {
           .update({
             email: email.toLowerCase().trim(),
             first_name: firstName?.trim() ?? null,
+            user_id: userId ?? null,
           })
           .eq('id', sessionId)
 

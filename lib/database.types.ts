@@ -9,12 +9,24 @@ export interface Database {
           created_at: string
           user_agent: string | null
           ip_hash: string | null
+          email: string | null
+          first_name: string | null
+          user_id: string | null
+          credits_balance: number
+          subscription_plan: string | null
+          subscription_expires_at: string | null
         }
         Insert: {
           id?: string
           created_at?: string
           user_agent?: string | null
           ip_hash?: string | null
+          email?: string | null
+          first_name?: string | null
+          user_id?: string | null
+          credits_balance?: number
+          subscription_plan?: string | null
+          subscription_expires_at?: string | null
         }
         Update: Partial<Database['public']['Tables']['sessions']['Insert']>
       }
@@ -46,6 +58,7 @@ export interface Database {
           analysis_id: string | null
           celebrity_name: string
           unlocked: boolean
+          scene_summary: string | null
           created_at: string
         }
         Insert: {
@@ -54,6 +67,7 @@ export interface Database {
           analysis_id?: string | null
           celebrity_name: string
           unlocked?: boolean
+          scene_summary?: string | null
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['generations']['Insert']>
@@ -66,6 +80,8 @@ export interface Database {
           amount_cents: number
           currency: string
           method: string | null
+          plan: string | null
+          credits_granted: number | null
           status: 'pending' | 'completed' | 'failed'
           created_at: string
         }
@@ -76,10 +92,31 @@ export interface Database {
           amount_cents: number
           currency?: string
           method?: string | null
+          plan?: string | null
+          credits_granted?: number | null
           status?: 'pending' | 'completed' | 'failed'
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['payments']['Insert']>
+      }
+      credit_transactions: {
+        Row: {
+          id: string
+          session_id: string
+          amount: number
+          reason: 'payment' | 'generation' | 'refund' | 'bonus'
+          reference_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          amount: number
+          reason: 'payment' | 'generation' | 'refund' | 'bonus'
+          reference_id?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['credit_transactions']['Insert']>
       }
     }
     Views: Record<string, never>
