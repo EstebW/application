@@ -1,16 +1,44 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from './database.types'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+function getPublicConfig() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? ''
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? ''
+  return { url, anonKey }
+}
 
-// Browser-safe client (anon key)
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
+let browserClient: SupabaseClient<Database> | null = null
 
-// Server-side client — uses service role key when available for API routes
+function getBrowserClient(): SupabaseClient<Database> {
+  if (browserClient) return browserClient
+
+  const { url, anonKey } = getPublicConfig()
+  if (!url || !anonKey) {
+    throw new Error('Configuration Supabase manquante (NEXT_PUBLIC_SUPABASE_URL / ANON_KEY)')
+  }
+
+  browserClient = createClient<Database>(url, anonKey)
+  return browserClient
+}
+
+/** Client browser — initialisation lazy (safe au build Vercel) */
+export const supabase = new Proxy({} as SupabaseClient<Database>, {
+  get(_target, prop) {
+    const client = getBrowserClient()
+    const value = Reflect.get(client, prop, client)
+    return typeof value === 'function' ? value.bind(client) : value
+  },
+})
+
+/** Client serveur — service role si dispo, sinon anon */
 export function createServerClient() {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? supabaseAnonKey
-  return createClient<Database>(supabaseUrl, key, {
+  const { url, anonKey } = getPublicConfig()
+  if (!url || !anonKey) {
+    throw new Error('Configuration Supabase manquante (NEXT_PUBLIC_SUPABASE_URL / ANON_KEY)')
+  }
+
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || anonKey
+  return createClient<Database>(url, key, {
     auth: { persistSession: false },
   })
 }
