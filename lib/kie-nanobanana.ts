@@ -159,7 +159,7 @@ async function createTask(
       input: {
         prompt,
         image_input: [imageUrl],
-        aspect_ratio: '4:3',
+        aspect_ratio: 'auto',
         resolution: '2K',
         output_format: 'jpg',
       },

@@ -61,6 +61,17 @@ function sanitizeSceneText(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
+function facePreservationBlock(): string[] {
+  return [
+    'IMAGE EDIT MODE — FACE PRESERVATION (HIGHEST PRIORITY):',
+    '- The uploaded reference image (image_input) is Person A: the REAL USER.',
+    '- Person A\'s face MUST remain an exact match to the reference photo: same bone structure, eyes, nose, lips, jawline, skin tone, age, hairstyle, and facial proportions.',
+    '- Do NOT alter, beautify, morph, swap, or replace Person A\'s face.',
+    '- Do NOT blend Person A\'s face with the celebrity or apply resemblance traits to Person A.',
+    '- Only change Person A\'s body context: outfit, pose, background, and scene — the face stays identical to the reference.',
+  ]
+}
+
 function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
   const {
     celebrityName,
@@ -79,26 +90,30 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
   const mood = funFact ? sanitizeSceneText(funFact) : ''
 
   const subjectLines = [
-    '- Person A: the person from the reference image (preserve face identity and likeness).',
-    `- Person B: ${celebrityName}${domain ? `, known as a ${domain}` : ''}.`,
-    style ? `- Celebrity iconic look: ${style}.` : '',
-    traitsLine ? `- Shared visual traits / vibe: ${traitsLine}.` : '',
+    '- Person A (USER): taken directly from the reference image — face locked, identity preserved.',
+    `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''} — rendered as a believable celebrity likeness beside Person A.`,
+    style ? `- Celebrity look / styling for Person B only: ${style}.` : '',
+    traitsLine ? `- Resemblance vibe (lighting/mood only, NOT Person A\'s face): ${traitsLine}.` : '',
     mood ? `- Scene mood / energy: ${mood}.` : '',
   ]
 
   const requirements = [
     'REQUIREMENTS:',
-    '- Both faces clearly visible, natural expressions, magazine-quality lighting.',
-    '- Respect the user instructions — do not replace them with generic alternatives.',
+    '- Person A\'s face must be instantly recognizable as the same person from the reference selfie.',
+    '- Both people clearly visible, natural expressions, photorealistic magazine-quality lighting.',
+    '- Respect user instructions — do not replace them with generic alternatives.',
     '- Tasteful, family-friendly, public event photography.',
+    '- Single cohesive photo — not a collage, not a face swap artifact.',
   ]
 
   if (mode === 'custom' && customPrompt) {
     const userPrompt = sanitizeSceneText(customPrompt)
     return [
-      'Photorealistic celebrity photo. Follow the USER PROMPT exactly — user instructions override any default styling.',
+      'Edit the reference image: place Person A (face unchanged) into a new scene with a celebrity.',
       '',
-      'USER PROMPT (MANDATORY — must be clearly visible in the final image):',
+      ...facePreservationBlock(),
+      '',
+      'USER PROMPT (MANDATORY — scene and styling, but Person A\'s face stays from reference):',
       userPrompt,
       '',
       'SUBJECTS:',
@@ -115,9 +130,11 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
   const position = sanitizeSceneText(scene.position)
 
   return [
-    'Photorealistic celebrity event photo. Follow the USER SCENE BRIEF exactly — user choices override any default styling.',
+    'Edit the reference image: place Person A (face unchanged) into a celebrity photo scene with Person B.',
     '',
-    'USER SCENE BRIEF (MANDATORY — must be clearly visible in the final image):',
+    ...facePreservationBlock(),
+    '',
+    'USER SCENE BRIEF (MANDATORY — scene details, Person A\'s face still from reference):',
     `1. LOCATION / SETTING: ${location}`,
     `2. OUTFITS for both people: ${outfits}`,
     `3. POSE and FRAMING: ${position}`,
@@ -279,7 +296,7 @@ async function createTask(
       input: {
         prompt,
         image_input: [imageUrl],
-        aspect_ratio: '4:3',
+        aspect_ratio: 'auto',
         resolution: '2K',
         output_format: 'jpg',
       },
