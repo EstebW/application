@@ -29,6 +29,7 @@ export interface Database {
           subscription_expires_at?: string | null
         }
         Update: Partial<Database['public']['Tables']['sessions']['Insert']>
+        Relationships: []
       }
       analyses: {
         Row: {
@@ -50,6 +51,7 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['analyses']['Insert']>
+        Relationships: []
       }
       generations: {
         Row: {
@@ -71,6 +73,7 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['generations']['Insert']>
+        Relationships: []
       }
       payments: {
         Row: {
@@ -98,6 +101,7 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['payments']['Insert']>
+        Relationships: []
       }
       credit_transactions: {
         Row: {
@@ -117,6 +121,7 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['credit_transactions']['Insert']>
+        Relationships: []
       }
     }
     Views: Record<string, never>
