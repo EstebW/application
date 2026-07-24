@@ -126,15 +126,21 @@ function sanitizeSceneText(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
-/** Bloc critique — mode édition Nano Banana 2 avec image_input */
+/** Bloc critique — mode édition Nano Banana 2 avec image_input.
+ *  C'est le critère #1 du produit : le visage de l'utilisateur ne doit
+ *  JAMAIS être modifié. Répété en tête ET en fin de prompt (les modèles
+ *  multimodaux suivent mieux les contraintes placées au début ET à la fin). */
 function facePreservationBlock(): string[] {
   return [
-    'IMAGE EDIT MODE — FACE PRESERVATION (HIGHEST PRIORITY):',
-    '- The uploaded reference image (image_input) is Person A: the REAL USER.',
-    '- Person A\'s face MUST remain an exact match to the reference photo: same bone structure, eyes, nose, lips, jawline, skin tone, age, hairstyle, and facial proportions.',
-    '- Do NOT alter, beautify, morph, swap, or replace Person A\'s face.',
-    '- Do NOT blend Person A\'s face with the celebrity or apply resemblance traits to Person A.',
-    '- Only change Person A\'s body context: outfit, pose, background, and scene — the face stays identical to the reference.',
+    '⚠️ NON-NEGOTIABLE RULE #1 — FACIAL IDENTITY LOCK ⚠️',
+    'This is the single most important requirement of the entire task, above scene accuracy, above styling, above everything else.',
+    '- The reference image (image_input) shows a REAL PERSON: Person A.',
+    '- Person A\'s face in the output MUST be the exact same face as in the reference photo — same bone structure, eyes, eyebrows, nose, lips, jawline, ears, hairline, skin tone, and age. Copy it as-is, do not redraw it from imagination.',
+    '- Do NOT generate a new face. Do NOT beautify, morph, average, stylize, smooth, or "improve" the face.',
+    '- Do NOT blend Person A\'s face with the celebrity\'s face. Do NOT apply any of the celebrity\'s facial features, bone structure, or resemblance traits to Person A.',
+    '- If a trade-off is ever needed between matching the requested scene and preserving Person A\'s exact face, ALWAYS choose to preserve the face.',
+    '- The only things allowed to change for Person A are: outfit, pose, body position, background, and lighting on the scene — never the face itself.',
+    '- A result where Person A is not instantly recognizable as literally the same person from the reference photo is a FAILED result, even if everything else about the image is perfect.',
   ]
 }
 
@@ -168,11 +174,14 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
 
   const requirements = [
     'REQUIREMENTS:',
-    '- Person A\'s face must be instantly recognizable as the same person from the reference selfie.',
     '- Both people clearly visible, natural expressions, photorealistic magazine-quality lighting.',
     '- Respect user instructions — do not replace them with generic alternatives.',
     '- Tasteful, family-friendly, public event photography.',
     '- Single cohesive photo — not a collage, not a face swap artifact.',
+  ]
+
+  const finalReminder = [
+    'FINAL CHECK before returning the image: look at Person A\'s face in your generated output and compare it to the reference photo. It must look like an unedited crop of the same face — same identity, zero changes. If it looks different in any way, that is a failure: fix it before returning the result.',
   ]
 
   if (mode === 'custom' && customPrompt) {
@@ -189,6 +198,8 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
       ...subjectLines,
       '',
       ...requirements,
+      '',
+      ...finalReminder,
     ].filter(Boolean).join('\n')
   }
 
@@ -214,6 +225,8 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     ...subjectLines,
     '',
     ...requirements,
+    '',
+    ...finalReminder,
   ].filter(Boolean).join('\n')
 }
 
