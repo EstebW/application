@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles } from 'lucide-react'
 import ProgressBar from './ProgressBar'
 import type { CelebrityResult, GenerationRequest } from '@/lib/types'
-import { callFunction } from '@/lib/functions'
+import { callFunction, FunctionCallError } from '@/lib/functions'
 import { formatKieError, isSensitiveContentError } from '@/lib/kie-errors'
 
 interface GenerationLoaderProps {
@@ -14,17 +14,20 @@ interface GenerationLoaderProps {
   celebrity: CelebrityResult
   generationRequest: GenerationRequest
   sessionId?: string
+  userId?: string
+  email?: string
   analysisId?: string
   onComplete: (imageBase64: string, generationId?: string, creditsBalance?: number) => void
   onRetry?: () => void
   onInsufficientCredits?: () => void
 }
 
-export default function GenerationLoader({ preview, imageBase64, celebrity, generationRequest, sessionId, analysisId, onComplete, onRetry, onInsufficientCredits }: GenerationLoaderProps) {
+export default function GenerationLoader({ preview, imageBase64, celebrity, generationRequest, sessionId, userId, email, analysisId, onComplete, onRetry, onInsufficientCredits }: GenerationLoaderProps) {
   const { name, celebrity_domain, celebrity_style_description } = celebrity
   const [stepIndex, setStepIndex] = useState(0)
   const [progress, setProgress] = useState(0)
   const [apiError, setApiError] = useState('')
+  const [apiErrorCode, setApiErrorCode] = useState<string | undefined>()
   const called = useRef(false)
 
   const steps = [
@@ -65,6 +68,8 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, gene
         photoScene: generationRequest.photoScene,
         customPrompt: generationRequest.customPrompt,
         sessionId,
+        userId,
+        email,
         analysisId,
       }
     )
@@ -89,21 +94,16 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, gene
       .catch((err: unknown) => {
         clearInterval(progressInterval)
         clearInterval(stepInterval)
-        const raw = err instanceof Error ? err.message : 'Erreur inconnue'
-        let message = raw
-        try {
-          const parsed = JSON.parse(raw) as { error?: string }
-          if (parsed.error) message = parsed.error
-        } catch {
-          // pas du JSON
-        }
-        const formatted = formatKieError(message)
+        const message = err instanceof Error ? err.message : 'Erreur inconnue'
+        const code = err instanceof FunctionCallError ? err.code : undefined
+        const formatted = formatKieError(message, code)
         setApiError(formatted)
-        if (
-          raw.includes('402') ||
-          message.toLowerCase().includes('insuffisants') ||
-          message.toLowerCase().includes('insufficient')
-        ) {
+        setApiErrorCode(code)
+        // Ne renvoie vers l'achat de crédits app QUE si l'erreur vient
+        // vraiment du contrôle de crédits de l'app (status 402 dédié).
+        // Une erreur côté kie.ai (fournisseur IA) ne doit jamais déclencher
+        // ce flux — acheter des crédits app ne résoudrait rien.
+        if (code === 'APP_CREDITS_INSUFFICIENT') {
           onInsufficientCredits?.()
         }
       })
@@ -224,7 +224,7 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, gene
                 Modifier la mise en scène
               </motion.button>
             )}
-            {(apiError.includes('insuffisants') || apiError.includes('Crédits')) && onInsufficientCredits && (
+            {apiErrorCode === 'APP_CREDITS_INSUFFICIENT' && onInsufficientCredits && (
               <motion.button
                 onClick={onInsufficientCredits}
                 className="mt-2 px-5 py-2.5 rounded-xl text-sm font-semibold"

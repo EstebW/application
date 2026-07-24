@@ -14,11 +14,13 @@ async function resolveSession(
   const { sessionId, userId, email } = opts
 
   // 1. Lien auth user → session (prioritaire pour un utilisateur connecté)
+  //    Privilégie le solde le plus haut si plusieurs sessions existent.
   if (userId) {
     const { data } = await db
       .from('sessions')
       .select('*')
       .eq('user_id', userId)
+      .order('credits_balance', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -48,6 +50,7 @@ async function resolveSession(
       .from('sessions')
       .select('*')
       .eq('email', normalized)
+      .order('credits_balance', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()

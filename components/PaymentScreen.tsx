@@ -3,14 +3,16 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Lock, ChevronRight, Check, Shield, Zap, Crown, TrendingDown, Flame } from 'lucide-react'
-import { callFunction } from '@/lib/functions'
+import { callFunction, FunctionCallError } from '@/lib/functions'
 import { PLAN_CREDITS } from '@/lib/plans'
 
 interface PaymentScreenProps {
   sessionId?: string
+  userId?: string
+  email?: string
   generationId?: string
   score?: number
-  onSuccess: (creditsBalance?: number, creditsGranted?: number) => void
+  onSuccess: (creditsBalance: number) => void
 }
 
 type PayMethod = 'card' | 'apple' | 'paypal'
@@ -118,13 +120,13 @@ const item = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const } },
 }
 
-export default function PaymentScreen({ sessionId, generationId, score, onSuccess }: PaymentScreenProps) {
+export default function PaymentScreen({ sessionId, userId, email, generationId, score, onSuccess }: PaymentScreenProps) {
   const [plan, setPlan] = useState<PlanId>('monthly')
   const [method, setMethod] = useState<PayMethod>('card')
   const [cardNumber, setCardNumber] = useState('')
   const [expiry, setExpiry] = useState('')
   const [cvc, setCvc] = useState('')
-  const [email, setEmail] = useState('')
+  const [payEmail, setEmail] = useState(email ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -134,30 +136,49 @@ export default function PaymentScreen({ sessionId, generationId, score, onSucces
     cardNumber.replace(/\s/g, '').length === 16 &&
     expiry.length === 5 &&
     cvc.length >= 3 &&
-    email.includes('@')
+    payEmail.includes('@')
 
   const canPay = method !== 'card' || isCardValid
 
-  function handlePay() {
+  async function handlePay() {
     if (!canPay) { setError('Vérifie les informations de paiement'); return }
     setError('')
     setLoading(true)
 
-    const creditsGranted = PLAN_CREDITS[plan]
+    const billingEmail = email ?? (payEmail.includes('@') ? payEmail.trim() : undefined)
 
-    // Paiement simulé : toujours réussir après le délai.
-    // L'appel backend est optionnel (crédits réels quand Stripe + migration seront prêts).
-    const logPayment = sessionId
-      ? callFunction<{ creditsBalance?: number }>('payment', { sessionId, generationId, method, plan })
-          .catch(() => null)
-      : Promise.resolve(null)
+    if (!sessionId && !userId && !billingEmail) {
+      setLoading(false)
+      setError('Impossible d\'identifier ton compte. Recharge la page et réessaie.')
+      return
+    }
 
     const delay = new Promise((r) => setTimeout(r, 2200))
 
-    Promise.all([logPayment, delay]).then(([paymentResult]) => {
+    try {
+      // Paiement simulé (carte/Apple/PayPal toujours acceptés), MAIS le crédit
+      // en base est réel : on attend la vraie confirmation du serveur avant
+      // de laisser l'utilisateur continuer, pour ne jamais afficher un solde
+      // qui n'existe pas réellement côté base de données.
+      const [paymentResult] = await Promise.all([
+        callFunction<{ creditsBalance: number }>('payment', {
+          sessionId,
+          userId,
+          email: billingEmail,
+          generationId,
+          method,
+          plan,
+        }),
+        delay,
+      ])
+
       setLoading(false)
-      onSuccess(paymentResult?.creditsBalance, creditsGranted)
-    })
+      onSuccess(paymentResult.creditsBalance)
+    } catch (err) {
+      setLoading(false)
+      const message = err instanceof FunctionCallError ? err.message : 'Erreur lors du paiement, réessaie.'
+      setError(`Le crédit n'a pas pu être enregistré (${message}). Réessaie ou contacte le support.`)
+    }
   }
 
   const inputClass =
@@ -378,7 +399,7 @@ export default function PaymentScreen({ sessionId, generationId, score, onSucces
           <motion.div key="card-form" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }} className="space-y-3">
             <input type="email" placeholder="Email (reçois ton accès ici)"
-              value={email} onChange={(e) => setEmail(e.target.value)} className={inputClass} />
+              value={payEmail} onChange={(e) => setEmail(e.target.value)} className={inputClass} />
             <input type="text" placeholder="1234 5678 9012 3456" inputMode="numeric"
               value={cardNumber} onChange={(e) => setCardNumber(formatCardNumber(e.target.value))} className={inputClass} />
             <div className="grid grid-cols-2 gap-3">

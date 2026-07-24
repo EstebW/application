@@ -18,10 +18,12 @@ import StarField from '@/components/StarField'
 import type { CelebrityResult, GenerationRequest } from '@/lib/types'
 import { callFunction } from '@/lib/functions'
 import type { AccountData } from '@/lib/account'
+import { supabase } from '@/lib/supabase'
 import {
   getStoredSessionId,
   setStoredSessionId,
   setStoredEmail,
+  getStoredEmail,
   setHasCompletedGeneration,
 } from '@/lib/session-storage'
 
@@ -63,13 +65,20 @@ export default function HomePage() {
   const [generationId, setGenerationId] = useState('')
   const [generationRequest, setGenerationRequest] = useState<GenerationRequest | null>(null)
   const [creditsBalance, setCreditsBalance] = useState(0)
+  const [userId, setUserId] = useState<string | undefined>()
+  const [userEmail, setUserEmail] = useState<string | undefined>()
   const sessionInitialized = useRef(false)
 
-  const refreshAccount = useCallback(async (sid: string) => {
+  const refreshAccount = useCallback(async (opts: { sessionId?: string; userId?: string; email?: string }) => {
     try {
-      const data = await callFunction<AccountData>('account', { sessionId: sid })
+      const data = await callFunction<AccountData>('account', opts)
       setCreditsBalance(data.creditsBalance)
+      if (data.sessionId) {
+        setSessionId(data.sessionId)
+        setStoredSessionId(data.sessionId)
+      }
       if (data.email) {
+        setUserEmail(data.email)
         setStoredEmail(data.email)
       }
     } catch {
@@ -77,26 +86,45 @@ export default function HomePage() {
     }
   }, [])
 
-  // Create or restore Supabase session on mount
+  // Create or restore Supabase session on mount — sync avec le compte auth si connecté
   useEffect(() => {
     if (sessionInitialized.current) return
     sessionInitialized.current = true
 
-    const stored = getStoredSessionId()
-    if (stored) {
-      setSessionId(stored)
-      refreshAccount(stored)
-      return
-    }
+    async function initSession() {
+      const stored = getStoredSessionId()
+      const storedEmail = getStoredEmail()
+      const { data: { user } } = await supabase.auth.getUser()
 
-    callFunction<{ sessionId?: string }>('session')
-      .then((d) => {
+      if (user) {
+        setUserId(user.id)
+        if (user.email) setUserEmail(user.email)
+        await refreshAccount({
+          userId: user.id,
+          sessionId: stored ?? undefined,
+          email: user.email ?? storedEmail ?? undefined,
+        })
+        return
+      }
+
+      if (stored) {
+        setSessionId(stored)
+        await refreshAccount({ sessionId: stored, email: storedEmail ?? undefined })
+        return
+      }
+
+      try {
+        const d = await callFunction<{ sessionId?: string }>('session')
         if (d.sessionId) {
           setSessionId(d.sessionId)
           setStoredSessionId(d.sessionId)
         }
-      })
-      .catch(() => { /* non-blocking */ })
+      } catch {
+        // non-blocking
+      }
+    }
+
+    initSession()
   }, [refreshAccount])
 
   // ── Handlers ───────────────────────────────────────────────────────────────
@@ -118,27 +146,44 @@ export default function HomePage() {
     setStep('signup')
   }, [])
 
-  const handleSignupComplete = useCallback((email?: string) => {
+  const handleSignupComplete = useCallback(async (email?: string) => {
     if (email) {
       setStoredEmail(email)
+      setUserEmail(email)
     }
-    if (creditsBalance > 0) {
-      setStep('customize')
-    } else {
-      setStep('payment')
-    }
-  }, [creditsBalance])
 
-  const handlePaymentSuccess = useCallback((newBalance?: number, creditsGranted?: number) => {
-    if (typeof newBalance === 'number') {
-      setCreditsBalance(newBalance)
-    } else if (typeof creditsGranted === 'number') {
-      setCreditsBalance((prev) => prev + creditsGranted)
-    } else if (sessionId) {
-      refreshAccount(sessionId)
+    let balance = creditsBalance
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      setUserId(user.id)
+      try {
+        const data = await callFunction<AccountData>('account', {
+          userId: user.id,
+          sessionId: sessionId || undefined,
+          email: user.email ?? email,
+        })
+        balance = data.creditsBalance
+        setCreditsBalance(balance)
+        if (data.sessionId) {
+          setSessionId(data.sessionId)
+          setStoredSessionId(data.sessionId)
+        }
+        if (data.email) {
+          setUserEmail(data.email)
+          setStoredEmail(data.email)
+        }
+      } catch {
+        // ignore — continue funnel
+      }
     }
+
+    setStep(balance > 0 ? 'customize' : 'payment')
+  }, [creditsBalance, sessionId])
+
+  const handlePaymentSuccess = useCallback((newBalance: number) => {
+    setCreditsBalance(newBalance)
     setStep('customize')
-  }, [sessionId, refreshAccount])
+  }, [])
 
   const handleInsufficientCredits = useCallback(() => {
     setStep('payment')
@@ -157,10 +202,16 @@ export default function HomePage() {
     setGeneratedImage(imageBase64)
     if (genId) setGenerationId(genId)
     if (typeof newBalance === 'number') setCreditsBalance(newBalance)
-    else if (sessionId) refreshAccount(sessionId)
+    else {
+      refreshAccount({
+        sessionId: sessionId || undefined,
+        userId,
+        email: userEmail,
+      })
+    }
     setHasCompletedGeneration()
     setStep('success')
-  }, [sessionId, refreshAccount])
+  }, [sessionId, userId, userEmail, refreshAccount])
 
   const handleReset = useCallback(() => {
     setPhotoPreview('')
@@ -305,6 +356,8 @@ export default function HomePage() {
               variants={slideVariants} initial="enter" animate="center" exit="exit">
               <PaymentScreen
                 sessionId={sessionId}
+                userId={userId}
+                email={userEmail}
                 generationId={generationId}
                 score={celebrity.score}
                 onSuccess={handlePaymentSuccess}
@@ -333,6 +386,8 @@ export default function HomePage() {
                 celebrity={celebrity}
                 generationRequest={generationRequest}
                 sessionId={sessionId}
+                userId={userId}
+                email={userEmail}
                 analysisId={analysisId}
                 onComplete={handleGenerationComplete}
                 onRetry={handleBackToCustomize}

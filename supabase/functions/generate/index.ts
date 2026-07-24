@@ -11,6 +11,21 @@ const POLL_INTERVAL_MS = 3000
 const POLL_TIMEOUT_MS = 90_000
 const GENERATION_CREDIT_COST = 1
 
+/** Les erreurs Postgrest/Supabase sont des objets simples, pas des `Error` — sans
+ *  ça, `err instanceof Error` échoue et masque le vrai message derrière "Erreur interne". */
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object' && err !== null) {
+    const rec = err as Record<string, unknown>
+    if (typeof rec.message === 'string' && rec.message) {
+      const details = typeof rec.details === 'string' && rec.details ? ` — ${rec.details}` : ''
+      const hint = typeof rec.hint === 'string' && rec.hint ? ` (hint: ${rec.hint})` : ''
+      return `${rec.message}${details}${hint}`
+    }
+  }
+  return String(err)
+}
+
 function buildSceneSummary(ctx: PhotoGenerationContext): string {
   if (ctx.mode === 'custom' && ctx.customPrompt) {
     return ctx.customPrompt.slice(0, 200)
@@ -59,6 +74,63 @@ interface PhotoGenerationContext {
 
 function sanitizeSceneText(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
+}
+
+type DbClient = ReturnType<typeof createClient>
+type SessionRow = { id: string; credits_balance?: number | null; user_id?: string | null; email?: string | null }
+
+/** Même logique que account : userId > sessionId > email, privilégie le solde le plus haut. */
+async function resolveBillingSession(
+  db: DbClient,
+  opts: { sessionId?: string; userId?: string; email?: string }
+): Promise<SessionRow | null> {
+  const { sessionId, userId, email } = opts
+
+  if (userId) {
+    const { data } = await db
+      .from('sessions')
+      .select('id, credits_balance, user_id, email')
+      .eq('user_id', userId)
+      .order('credits_balance', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (data) return data as SessionRow
+  }
+
+  if (sessionId) {
+    const { data } = await db
+      .from('sessions')
+      .select('id, credits_balance, user_id, email')
+      .eq('id', sessionId)
+      .maybeSingle()
+    if (data) {
+      if (userId && !data.user_id) {
+        await db.from('sessions').update({ user_id: userId }).eq('id', sessionId)
+      }
+      return data as SessionRow
+    }
+  }
+
+  if (email?.trim()) {
+    const normalized = email.trim().toLowerCase()
+    const { data } = await db
+      .from('sessions')
+      .select('id, credits_balance, user_id, email')
+      .eq('email', normalized)
+      .order('credits_balance', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (data) {
+      if (userId && !data.user_id) {
+        await db.from('sessions').update({ user_id: userId }).eq('id', data.id)
+      }
+      return data as SessionRow
+    }
+  }
+
+  return null
 }
 
 function facePreservationBlock(): string[] {
@@ -353,7 +425,7 @@ Deno.serve(async (req: Request) => {
     const kieKey = Deno.env.get('KIE_API_KEY')
     if (!kieKey) throw new Error('KIE_API_KEY non configurée dans les secrets Supabase')
 
-    const { imageBase64, celebrityName, celebrityDomain, celebrityStyleDescription, celebrityTraits, funFact, generationMode, photoScene, customPrompt, sessionId, analysisId } = await req.json() as {
+    const { imageBase64, celebrityName, celebrityDomain, celebrityStyleDescription, celebrityTraits, funFact, generationMode, photoScene, customPrompt, sessionId, analysisId, userId, email } = await req.json() as {
       imageBase64: string
       celebrityName: string
       celebrityDomain?: string
@@ -365,6 +437,8 @@ Deno.serve(async (req: Request) => {
       customPrompt?: string
       sessionId?: string
       analysisId?: string
+      userId?: string
+      email?: string
     }
 
     if (!imageBase64 || !celebrityName) throw new Error('imageBase64 et celebrityName requis')
@@ -393,22 +467,25 @@ Deno.serve(async (req: Request) => {
 
     const sceneSummary = buildSceneSummary(generationContext)
 
-    if (sessionId) {
-      const db = createClient(
-        Deno.env.get('SUPABASE_URL')!,
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-        { auth: { persistSession: false } }
-      )
-      const { data: session } = await db
-        .from('sessions')
-        .select('credits_balance')
-        .eq('id', sessionId)
-        .single()
+    const db = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      { auth: { persistSession: false } }
+    )
 
-      const balance = session?.credits_balance ?? 0
+    const billingSession = (sessionId || userId || email?.trim())
+      ? await resolveBillingSession(db, { sessionId, userId, email })
+      : null
+    const billingSessionId = billingSession?.id ?? sessionId
+
+    if (billingSessionId) {
+      const balance = billingSession?.credits_balance ?? 0
       if (balance < GENERATION_CREDIT_COST) {
         return new Response(
-          JSON.stringify({ error: 'Crédits insuffisants. Achète un pack pour générer une photo.' }),
+          JSON.stringify({
+            error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
+            code: 'APP_CREDITS_INSUFFICIENT',
+          }),
           { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
         )
       }
@@ -427,18 +504,12 @@ Deno.serve(async (req: Request) => {
     let generationId: string | undefined
     let creditsBalance: number | undefined
 
-    if (sessionId) {
+    if (billingSessionId) {
       try {
-        const db = createClient(
-          Deno.env.get('SUPABASE_URL')!,
-          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-          { auth: { persistSession: false } }
-        )
-
         const { data: session } = await db
           .from('sessions')
           .select('credits_balance')
-          .eq('id', sessionId)
+          .eq('id', billingSessionId)
           .single()
 
         const currentBalance = session?.credits_balance ?? 0
@@ -447,8 +518,9 @@ Deno.serve(async (req: Request) => {
         const { data } = await db
           .from('generations')
           .insert({
-            session_id: sessionId,
-            analysis_id: analysisId ?? null,
+            session_id: billingSessionId,
+            // "" n'est pas un UUID Postgres valide — même piège que payment/index.ts.
+            analysis_id: analysisId?.trim() ? analysisId.trim() : null,
             celebrity_name: celebrityName,
             unlocked: true,
             scene_summary: sceneSummary || null,
@@ -461,10 +533,10 @@ Deno.serve(async (req: Request) => {
         await db
           .from('sessions')
           .update({ credits_balance: newBalance })
-          .eq('id', sessionId)
+          .eq('id', billingSessionId)
 
         await db.from('credit_transactions').insert({
-          session_id: sessionId,
+          session_id: billingSessionId,
           amount: -GENERATION_CREDIT_COST,
           reason: 'generation',
           reference_id: generationId ?? null,
@@ -481,10 +553,21 @@ Deno.serve(async (req: Request) => {
       { headers: { ...CORS, 'Content-Type': 'application/json' } }
     )
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Erreur interne'
+    const message = getErrorMessage(err)
     console.error('[generate]', message)
+
+    // Erreur côté fournisseur IA (kie.ai) : ex. leur propre code 402 pour
+    // solde insuffisant sur LEUR compte. Ne jamais confondre avec les
+    // crédits de l'utilisateur (APP_CREDITS_INSUFFICIENT ci-dessus, status 402).
+    const lower = message.toLowerCase()
+    const isKieVendorCreditError =
+      lower.includes('kie.ai') && (lower.includes('code 402') || lower.includes('insufficient') || lower.includes('balance'))
+
     return new Response(
-      JSON.stringify({ error: message }),
+      JSON.stringify({
+        error: message,
+        code: isKieVendorCreditError ? 'KIE_VENDOR_INSUFFICIENT' : undefined,
+      }),
       { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } }
     )
   }

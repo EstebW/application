@@ -98,25 +98,9 @@ export default function UserDashboard() {
     return () => { cancelled = true }
   }, [router])
 
-  const handlePaymentSuccess = async (newBalance?: number, creditsGranted?: number) => {
+  const handlePaymentSuccess = (newBalance: number) => {
     setShowPayment(false)
-    if (!account?.sessionId) return
-
-    if (typeof newBalance === 'number') {
-      setAccount((prev) => prev ? { ...prev, creditsBalance: newBalance } : prev)
-      return
-    }
-    if (typeof creditsGranted === 'number') {
-      setAccount((prev) => prev ? { ...prev, creditsBalance: prev.creditsBalance + creditsGranted } : prev)
-      return
-    }
-
-    try {
-      const data = await callFunction<AccountData>('account', { sessionId: account.sessionId })
-      setAccount(data)
-    } catch {
-      // ignore
-    }
+    setAccount((prev) => prev ? { ...prev, creditsBalance: newBalance } : prev)
   }
 
   const handleLogout = async () => {
@@ -229,6 +213,7 @@ export default function UserDashboard() {
           style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <PaymentScreen
             sessionId={account.sessionId}
+            email={account.email ?? undefined}
             onSuccess={handlePaymentSuccess}
           />
         </div>
