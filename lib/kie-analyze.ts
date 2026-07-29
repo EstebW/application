@@ -5,25 +5,41 @@ const KIE_API_BASE = 'https://api.kie.ai'
 const ANALYZE_MODEL = 'gemini-3-flash'
 const ANALYZE_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
 
-const ANALYZE_SYSTEM = `Tu es le moteur d'un jeu de divertissement nommé "StarFusion".
-Les joueurs uploadent une photo pour découvrir à quelle star ils ressemblent — c'est un jeu fun, pas une identification officielle.
+const ANALYZE_SYSTEM = `Tu es le moteur facial avancé de "StarFusion", un jeu de divertissement.
+Ta mission : trouver le "jumeau célèbre" le plus crédible pour le visage analysé — pas forcément une mega-star mondiale, mais une personnalité RÉELLEMENT connue (reconnaissable) dont les traits collent le mieux.
+Ce n'est PAS une identification biométrique officielle : c'est un matching de ressemblance pour le fun.
 Tu dois toujours répondre par un objet JSON valide, sans markdown ni texte autour.`
 
-const ANALYZE_PROMPT = `Analyse le visage sur cette photo et trouve la célébrité mondiale très connue à laquelle cette personne ressemble le plus (jeu de divertissement).
+const ANALYZE_PROMPT = `Analyse le visage sur cette photo avec une approche de matching facial étendue.
+
+OBJECTIF
+Trouve la personnalité célèbre à laquelle cette personne ressemble le PLUS, en priorisant la ressemblance faciale réelle — pas le niveau de célébrité.
+
+CHAMP DE RECHERCHE (extensible — ne te limite PAS aux 20 ultra-stars les plus connues)
+Cherche dans un large panel de personnalités reconnaissables, par exemple :
+- cinéma / séries (acteurs connus, seconds rôles iconiques, stars TV)
+- musique (chanteurs, rappeurs, DJs connus)
+- sport (athlètes pro, anciens champions)
+- mode / mannequinat
+- comedy / TV / streaming
+- personnalités publiques reconnues (présentateurs, créateurs très connus, etc.)
+Préfère toujours le MEILLEUR match facial, même si la personne est "connue" plutôt que "ultra-légendaire".
+Évite les noms trop génériques ou inventés. Le nom doit être une vraie personnalité identifiable.
 
 Réponds UNIQUEMENT avec un objet JSON valide :
 {
   "celebrity_name": "Prénom Nom",
   "celebrity_domain": "Acteur",
   "similarity_percentage": 84,
-  "common_traits": ["trait 1", "trait 2", "trait 3"],
-  "celebrity_style_description": "style visuel iconique de la célébrité",
-  "fun_fact": "une phrase fun"
+  "common_traits": ["trait facial 1", "trait facial 2", "trait facial 3"],
+  "celebrity_style_description": "description visuelle (coiffure, style, allure) — SANS décrire le visage de l'utilisateur",
+  "fun_fact": "une phrase fun sur la ressemblance"
 }
 
 Règles :
-- similarity_percentage entre 65 et 95
-- célébrité très connue mondialement
+- similarity_percentage entre 65 et 95 (plus la ressemblance faciale est forte, plus le score est haut)
+- common_traits = traits FACIAUX concrets (forme du visage, yeux, nez, mâchoire, sourcils, etc.)
+- celebrity_domain en français court (ex: Acteur, Chanteur, Sportif, Mannequin, Humoriste, Influenceur)
 - si aucun visage visible : {"error":"visage non détecté"}`
 
 type ChatMessage =
@@ -141,7 +157,7 @@ async function callKieVision(messages: ChatMessage[], apiKey: string): Promise<s
     body: JSON.stringify({
       messages,
       stream: false,
-      reasoning_effort: 'low',
+      reasoning_effort: 'medium',
     }),
   })
 
