@@ -12,6 +12,8 @@ interface GenerationLoaderProps {
   preview: string
   imageBase64: string
   celebrity: CelebrityResult
+  /** Vraie photo de la célébrité importée par l'utilisateur (mode "Choisis ta star") */
+  celebrityImageBase64?: string
   generationRequest: GenerationRequest
   sessionId?: string
   userId?: string
@@ -22,7 +24,7 @@ interface GenerationLoaderProps {
   onInsufficientCredits?: () => void
 }
 
-export default function GenerationLoader({ preview, imageBase64, celebrity, generationRequest, sessionId, userId, email, analysisId, onComplete, onRetry, onInsufficientCredits }: GenerationLoaderProps) {
+export default function GenerationLoader({ preview, imageBase64, celebrity, celebrityImageBase64, generationRequest, sessionId, userId, email, analysisId, onComplete, onRetry, onInsufficientCredits }: GenerationLoaderProps) {
   const { name, celebrity_domain, celebrity_style_description } = celebrity
   const [stepIndex, setStepIndex] = useState(0)
   const [progress, setProgress] = useState(0)
@@ -64,6 +66,7 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, gene
         celebrityStyleDescription: celebrity_style_description,
         celebrityTraits: celebrity.traits,
         funFact: celebrity.fun_fact,
+        celebrityImageBase64,
         generationMode: generationRequest.mode,
         photoScene: generationRequest.photoScene,
         customPrompt: generationRequest.customPrompt,

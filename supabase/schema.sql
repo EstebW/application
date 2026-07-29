@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════
---  Mon Jumeau Célèbre — Schéma Supabase
+--  StarFusion — Schéma Supabase
 --  Colle ce SQL dans : Supabase Dashboard → SQL Editor → Run
 -- ═══════════════════════════════════════════════════════════════
 

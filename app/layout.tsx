@@ -2,10 +2,10 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Mon Jumeau Célèbre — Découvre ta célébrité jumelle',
+  title: 'StarFusion — Découvre ta célébrité jumelle',
   description: 'Upload ton selfie, l\'IA analyse ton visage et révèle à quelle star tu ressembles vraiment.',
   openGraph: {
-    title: 'Mon Jumeau Célèbre',
+    title: 'StarFusion',
     description: 'Découvre à quelle célébrité tu ressembles vraiment',
     type: 'website',
   },

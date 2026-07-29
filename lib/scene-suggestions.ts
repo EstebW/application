@@ -144,6 +144,18 @@ function facePreservationBlock(): string[] {
   ]
 }
 
+/** Bloc pour Person B quand une vraie photo de la célébrité est fournie
+ *  (2e image de image_input) — mode "Choisis ta star". Moins strict que le
+ *  verrou de Person A, mais empêche le modèle d'inventer un autre visage. */
+function celebrityReferenceBlock(celebrityName: string): string[] {
+  return [
+    '⚠️ RULE #2 — CELEBRITY LIKENESS FROM REFERENCE PHOTO ⚠️',
+    `- image_input contains TWO reference photos: the FIRST is Person A (the user), the SECOND is a real photo of ${celebrityName} (Person B).`,
+    `- Person B\'s face in the output MUST match the SECOND reference photo — same face shape, features, hair, and general appearance as ${celebrityName} in that photo. Use it as the ground truth for what ${celebrityName} looks like.`,
+    '- Do NOT invent a different face for Person B and do NOT blend Person B\'s face with Person A\'s face.',
+  ]
+}
+
 /**
  * Prompt Nano Banana 2 — scènes guidées ou prompt libre utilisateur.
  */
@@ -157,6 +169,7 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     mode,
     scene,
     customPrompt,
+    hasCelebrityReferenceImage,
   } = ctx
 
   const domain = sanitizeSceneText(celebrityDomain)
@@ -166,11 +179,13 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
 
   const subjectLines = [
     '- Person A (USER): taken directly from the reference image — face locked, identity preserved.',
-    `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''} — rendered as a believable celebrity likeness beside Person A.`,
+    `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''}${hasCelebrityReferenceImage ? ' — rendered from the second reference photo provided (see RULE #2 below).' : ' — rendered as a believable celebrity likeness beside Person A.'}`,
     style ? `- Celebrity look / styling for Person B only: ${style}.` : '',
     traitsLine ? `- Resemblance vibe (lighting/mood only, NOT Person A\'s face): ${traitsLine}.` : '',
     mood ? `- Scene mood / energy: ${mood}.` : '',
   ]
+
+  const celebrityBlock = hasCelebrityReferenceImage ? celebrityReferenceBlock(celebrityName) : []
 
   const requirements = [
     'REQUIREMENTS:',
@@ -191,6 +206,7 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
       '',
       ...facePreservationBlock(),
       '',
+      ...celebrityBlock,
       'USER PROMPT (MANDATORY — scene and styling, but Person A\'s face stays from reference):',
       userPrompt,
       '',
@@ -216,6 +232,7 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...facePreservationBlock(),
     '',
+    ...celebrityBlock,
     'USER SCENE BRIEF (MANDATORY — scene details, Person A\'s face still from reference):',
     `1. LOCATION / SETTING: ${location}`,
     `2. OUTFITS for both people: ${outfits}`,

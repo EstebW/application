@@ -2,9 +2,12 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, Zap, LogIn } from 'lucide-react'
+import { ArrowLeft, LogIn } from 'lucide-react'
 import Link from 'next/link'
 import HeroSection from '@/components/HeroSection'
+import ModeChoice from '@/components/ModeChoice'
+import CustomPhotoUpload from '@/components/CustomPhotoUpload'
+import CustomCelebrityForm from '@/components/CustomCelebrityForm'
 import PhotoUploadSection from '@/components/PhotoUploadSection'
 import AnalysisLoader from '@/components/AnalysisLoader'
 import TeaserResult from '@/components/TeaserResult'
@@ -15,6 +18,7 @@ import GenerationLoader from '@/components/GenerationLoader'
 import SuccessScreen from '@/components/SuccessScreen'
 import Stepper from '@/components/Stepper'
 import StarField from '@/components/StarField'
+import StarFusionLogo from '@/components/StarFusionLogo'
 import type { CelebrityResult, GenerationRequest } from '@/lib/types'
 import { callFunction } from '@/lib/functions'
 import type { AccountData } from '@/lib/account'
@@ -27,16 +31,34 @@ import {
   setHasCompletedGeneration,
 } from '@/lib/session-storage'
 
-// ── New funnel:
-// hero → upload → analyzing → teaser → signup → payment → customize → generating → success
-type Step = 'hero' | 'upload' | 'analyzing' | 'teaser' | 'signup' | 'payment' | 'customize' | 'generating' | 'success'
+// ── Deux funnels possibles :
+// 1) Mode "jumeau" (match)  : modeChoice → hero → upload → analyzing → teaser → signup → payment → customize → generating → success
+// 2) Mode "libre" (custom)  : modeChoice → customUpload → customCelebrity → signup → payment → customize → generating → success
+type Step =
+  | 'modeChoice'
+  | 'hero'
+  | 'upload'
+  | 'analyzing'
+  | 'teaser'
+  | 'customUpload'
+  | 'customCelebrity'
+  | 'signup'
+  | 'payment'
+  | 'customize'
+  | 'generating'
+  | 'success'
+
+type AppMode = 'match' | 'custom'
 
 function getStepperIndex(step: Step): number {
   switch (step) {
+    case 'modeChoice':
     case 'hero':
     case 'upload':
+    case 'customUpload':
       return 0
     case 'analyzing':
+    case 'customCelebrity':
       return 1
     case 'teaser':
     case 'signup':
@@ -56,9 +78,11 @@ const slideVariants = {
 }
 
 export default function HomePage() {
-  const [step, setStep] = useState<Step>('hero')
+  const [step, setStep] = useState<Step>('modeChoice')
+  const [appMode, setAppMode] = useState<AppMode | null>(null)
   const [photoPreview, setPhotoPreview] = useState('')
   const [celebrity, setCelebrity] = useState<CelebrityResult | null>(null)
+  const [celebrityPhoto, setCelebrityPhoto] = useState('')
   const [generatedImage, setGeneratedImage] = useState('')
   const [sessionId, setSessionId] = useState('')
   const [analysisId, setAnalysisId] = useState('')
@@ -129,9 +153,37 @@ export default function HomePage() {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
+  const handleSelectMatchMode = useCallback(() => {
+    setAppMode('match')
+    setStep('hero')
+  }, [])
+
+  const handleSelectCustomMode = useCallback(() => {
+    setAppMode('custom')
+    setStep('customUpload')
+  }, [])
+
   const handlePhotoSelected = useCallback((_file: File, preview: string) => {
     setPhotoPreview(preview)
     setStep('upload')
+  }, [])
+
+  const handleCustomPhotoSelected = useCallback((_file: File, preview: string) => {
+    setPhotoPreview(preview)
+    setStep('customCelebrity')
+  }, [])
+
+  const handleCustomCelebritySubmit = useCallback((data: { name: string; domain: string; celebrityImageBase64: string }) => {
+    setCelebrity({
+      name: data.name,
+      celebrity_domain: data.domain,
+      score: 0,
+      traits: [],
+      celebrity_style_description: '',
+      fun_fact: '',
+    })
+    setCelebrityPhoto(data.celebrityImageBase64)
+    setStep('signup')
   }, [])
 
   const handleAnalyze = useCallback(() => setStep('analyzing'), [])
@@ -216,15 +268,17 @@ export default function HomePage() {
   const handleReset = useCallback(() => {
     setPhotoPreview('')
     setCelebrity(null)
+    setCelebrityPhoto('')
     setGeneratedImage('')
     setAnalysisId('')
     setGenerationId('')
     setGenerationRequest(null)
-    setStep('hero')
+    setAppMode(null)
+    setStep('modeChoice')
   }, [])
 
   // ── Back button visibility ─────────────────────────────────────────────────
-  const noBack: Step[] = ['hero', 'analyzing', 'generating', 'signup', 'payment', 'customize', 'success']
+  const noBack: Step[] = ['modeChoice', 'hero', 'analyzing', 'generating', 'signup', 'payment', 'customize', 'success']
   const showBackButton = !noBack.includes(step)
 
   return (
@@ -247,45 +301,37 @@ export default function HomePage() {
       </div>
 
       {/* ── Header ── */}
-      <header className="relative z-20 flex items-center justify-between px-5 pt-5 pb-3">
-        <div className="w-9 h-9 flex items-center justify-center">
-          <AnimatePresence>
-            {showBackButton && (
-              <motion.button
-                initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }}
-                onClick={handleReset}
-                className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-                whileHover={{ borderColor: 'rgba(212,175,55,0.4)', scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <ArrowLeft size={15} className="text-[#A0A0A0]" />
-              </motion.button>
-            )}
-          </AnimatePresence>
-        </div>
+      <header className="relative z-20 max-w-[390px] mx-auto w-full px-5 pt-5 pb-4">
+        <div className="relative flex items-center justify-between min-h-[44px]">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <AnimatePresence>
+              {showBackButton && (
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }}
+                  onClick={handleReset}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors flex-shrink-0"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                  whileHover={{ borderColor: 'rgba(212,175,55,0.4)', scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <ArrowLeft size={15} className="text-[#A0A0A0]" />
+                </motion.button>
+              )}
+            </AnimatePresence>
 
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}
-          className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-lg flex items-center justify-center"
-            style={{ background: 'linear-gradient(135deg,#D4AF37,#F0D060)' }}>
-            <Zap size={12} className="text-black" fill="black" />
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+              className="min-w-0"
+            >
+              <StarFusionLogo variant="duo" size="navbar" />
+            </motion.div>
           </div>
-          <span className="text-[13px] font-black tracking-tight"
-            style={{
-              background: 'linear-gradient(135deg,#D4AF37,#F0D060)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}>
-            Mon Jumeau Célèbre
-          </span>
-        </motion.div>
 
-        <div className="flex items-center justify-end min-w-[72px]">
           <Link
             href="/login"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex-shrink-0"
             style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#A0A0A0' }}
           >
             <LogIn size={13} />
@@ -303,10 +349,31 @@ export default function HomePage() {
       <main className="relative z-10 flex-1 flex flex-col pb-10 pt-2 max-w-[390px] mx-auto w-full">
         <AnimatePresence mode="wait">
 
+          {step === 'modeChoice' && (
+            <motion.div key="modeChoice" className="px-5"
+              variants={slideVariants} initial="enter" animate="center" exit="exit">
+              <ModeChoice onSelectMatch={handleSelectMatchMode} onSelectCustom={handleSelectCustomMode} />
+            </motion.div>
+          )}
+
           {step === 'hero' && (
             <motion.div key="hero" className="px-5"
               variants={slideVariants} initial="enter" animate="center" exit="exit">
               <HeroSection onPhotoSelected={handlePhotoSelected} />
+            </motion.div>
+          )}
+
+          {step === 'customUpload' && (
+            <motion.div key="customUpload" className="px-5"
+              variants={slideVariants} initial="enter" animate="center" exit="exit">
+              <CustomPhotoUpload onPhotoSelected={handleCustomPhotoSelected} />
+            </motion.div>
+          )}
+
+          {step === 'customCelebrity' && (
+            <motion.div key="customCelebrity" className="px-5"
+              variants={slideVariants} initial="enter" animate="center" exit="exit">
+              <CustomCelebrityForm preview={photoPreview} onSubmit={handleCustomCelebritySubmit} />
             </motion.div>
           )}
 
@@ -344,7 +411,7 @@ export default function HomePage() {
             <motion.div key="signup" className="px-5"
               variants={slideVariants} initial="enter" animate="center" exit="exit">
               <SignupGate
-                score={celebrity.score}
+                score={appMode === 'custom' ? undefined : celebrity.score}
                 sessionId={sessionId}
                 onSuccess={(_firstName, email) => handleSignupComplete(email)}
               />
@@ -359,7 +426,7 @@ export default function HomePage() {
                 userId={userId}
                 email={userEmail}
                 generationId={generationId}
-                score={celebrity.score}
+                score={appMode === 'custom' ? undefined : celebrity.score}
                 onSuccess={handlePaymentSuccess}
               />
             </motion.div>
@@ -384,6 +451,7 @@ export default function HomePage() {
                 preview={photoPreview}
                 imageBase64={photoPreview}
                 celebrity={celebrity}
+                celebrityImageBase64={celebrityPhoto || undefined}
                 generationRequest={generationRequest}
                 sessionId={sessionId}
                 userId={userId}
@@ -404,6 +472,7 @@ export default function HomePage() {
                 generatedImage={generatedImage}
                 celebrity={celebrity}
                 creditsBalance={creditsBalance}
+                showMatchScore={appMode !== 'custom'}
                 onReset={handleReset}
               />
             </motion.div>
@@ -417,7 +486,7 @@ export default function HomePage() {
         <div className="h-px w-full mb-4"
           style={{ background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent)' }} />
         <p className="text-[#383838] text-[11px] tracking-wide">
-          Mon Jumeau Célèbre · Pour le divertissement uniquement · Tes photos ne sont pas stockées
+          StarFusion · Pour le divertissement uniquement · Tes photos ne sont pas stockées
         </p>
       </footer>
     </div>

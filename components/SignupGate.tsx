@@ -8,7 +8,7 @@ import { signUpWithEmail, signInWithEmail, formatAuthError } from '@/lib/auth'
 import { setStoredEmail } from '@/lib/session-storage'
 
 interface SignupGateProps {
-  score: number
+  score?: number
   sessionId?: string
   onSuccess: (firstName: string, email: string) => void
 }
@@ -98,20 +98,24 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
               animate={{ scale: [1, 1.1, 1], opacity: [0.8, 1, 0.8] }}
               transition={{ duration: 1.8, repeat: Infinity }}
             >
-              <Sparkles size={22} className="text-[#D4AF37] mb-1" />
+              <Sparkles size={typeof score === 'number' ? 22 : 30} className="text-[#D4AF37] mb-1" />
             </motion.div>
-            <span
-              className="text-4xl font-black leading-none"
-              style={{
-                background: 'linear-gradient(135deg, #D4AF37, #F0D060)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-              }}
-            >
-              {score}%
-            </span>
-            <span className="text-[#D4AF37]/60 text-[10px] font-bold mt-0.5">match</span>
+            {typeof score === 'number' && (
+              <>
+                <span
+                  className="text-4xl font-black leading-none"
+                  style={{
+                    background: 'linear-gradient(135deg, #D4AF37, #F0D060)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                  }}
+                >
+                  {score}%
+                </span>
+                <span className="text-[#D4AF37]/60 text-[10px] font-bold mt-0.5">match</span>
+              </>
+            )}
           </motion.div>
         </div>
 
@@ -123,7 +127,9 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
             Crée ton compte
           </h2>
           <p className="text-[#808080] text-sm leading-relaxed">
-            Inscris-toi pour débloquer ton jumeau et générer ta photo.
+            {typeof score === 'number'
+              ? 'Inscris-toi pour débloquer ton jumeau et générer ta photo.'
+              : 'Inscris-toi pour générer ta photo avec la star de ton choix.'}
           </p>
         </div>
 

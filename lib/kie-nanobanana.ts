@@ -72,7 +72,7 @@ async function uploadUrlToKie(fileUrl: string, apiKey: string): Promise<string |
     },
     body: JSON.stringify({
       fileUrl,
-      uploadPath: 'mon-jumeau-celebre',
+      uploadPath: 'starfusion',
       fileName: `ref-${Date.now()}.jpg`,
     }),
   })
@@ -106,7 +106,7 @@ async function uploadBase64ToKie(imageBase64: string, apiKey: string): Promise<s
     },
     body: JSON.stringify({
       base64Data,
-      uploadPath: 'mon-jumeau-celebre',
+      uploadPath: 'starfusion',
       fileName,
     }),
   })
@@ -138,7 +138,7 @@ async function resolveReferenceImageUrl(imageBase64: string, apiKey: string): Pr
 }
 
 async function createTask(
-  imageUrl: string,
+  imageUrls: string[],
   ctx: PhotoGenerationContext,
   apiKey: string
 ): Promise<string> {
@@ -158,7 +158,7 @@ async function createTask(
       model: 'nano-banana-2',
       input: {
         prompt,
-        image_input: [imageUrl],
+        image_input: imageUrls,
         aspect_ratio: 'auto',
         resolution: '2K',
         output_format: 'jpg',
@@ -210,10 +210,15 @@ async function pollTask(taskId: string, apiKey: string): Promise<string> {
 export async function generateCelebrityPhoto(
   imageBase64: string,
   ctx: PhotoGenerationContext,
-  apiKey: string
+  apiKey: string,
+  celebrityImageBase64?: string
 ): Promise<string> {
   const imageUrl = await resolveReferenceImageUrl(imageBase64, apiKey)
-  const taskId = await createTask(imageUrl, ctx, apiKey)
+  const imageUrls = [imageUrl]
+  if (celebrityImageBase64) {
+    imageUrls.push(await resolveReferenceImageUrl(celebrityImageBase64, apiKey))
+  }
+  const taskId = await createTask(imageUrls, ctx, apiKey)
   const resultUrl = await pollTask(taskId, apiKey)
 
   const imgRes = await fetch(resultUrl)

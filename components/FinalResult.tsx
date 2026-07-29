@@ -188,7 +188,7 @@ export default function FinalResult({ celebrity, generatedImage, onReset, onPay 
           {/* Watermark bottom */}
           <div className="absolute bottom-4 left-0 right-0 flex justify-center">
             <p className="text-white/20 text-[10px] font-bold tracking-[0.2em] uppercase select-none">
-              monjumeaucelèbre.com
+              starfusion.app
             </p>
           </div>
         </div>

@@ -1,6 +1,6 @@
 @echo off
 echo ===================================
-echo  Mon Jumeau Celebre - Setup
+echo  StarFusion - Setup
 echo ===================================
 echo.
 

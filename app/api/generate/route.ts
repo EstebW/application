@@ -57,6 +57,7 @@ export async function POST(req: Request) {
       celebrityStyleDescription?: string
       celebrityTraits?: string[]
       funFact?: string
+      celebrityImageBase64?: string
       generationMode?: PhotoGenerationMode
       photoScene?: PhotoScene
       customPrompt?: string
@@ -71,6 +72,7 @@ export async function POST(req: Request) {
       celebrityStyleDescription,
       celebrityTraits,
       funFact,
+      celebrityImageBase64,
       sessionId,
       analysisId,
     } = body
@@ -95,6 +97,7 @@ export async function POST(req: Request) {
       mode: generationInput.mode,
       scene: generationInput.scene,
       customPrompt: generationInput.customPrompt,
+      hasCelebrityReferenceImage: Boolean(celebrityImageBase64),
     }
 
     const kieKey = process.env.KIE_API_KEY?.trim()
@@ -104,7 +107,8 @@ export async function POST(req: Request) {
       const generatedBase64 = await generateCelebrityPhoto(
         imageBase64,
         generationContext,
-        kieKey
+        kieKey,
+        celebrityImageBase64
       )
 
       let generationId: string | undefined

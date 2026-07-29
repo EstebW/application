@@ -70,6 +70,7 @@ interface PhotoGenerationContext {
   mode: 'presets' | 'custom'
   scene?: PhotoScene
   customPrompt?: string
+  hasCelebrityReferenceImage?: boolean
 }
 
 function sanitizeSceneText(text: string): string {
@@ -150,6 +151,18 @@ function facePreservationBlock(): string[] {
   ]
 }
 
+/** Bloc pour Person B quand une vraie photo de la célébrité est fournie
+ *  (2e image de image_input) — mode "Choisis ta star". Moins strict que le
+ *  verrou de Person A, mais empêche le modèle d'inventer un autre visage. */
+function celebrityReferenceBlock(celebrityName: string): string[] {
+  return [
+    '⚠️ RULE #2 — CELEBRITY LIKENESS FROM REFERENCE PHOTO ⚠️',
+    `- image_input contains TWO reference photos: the FIRST is Person A (the user), the SECOND is a real photo of ${celebrityName} (Person B).`,
+    `- Person B\'s face in the output MUST match the SECOND reference photo — same face shape, features, hair, and general appearance as ${celebrityName} in that photo. Use it as the ground truth for what ${celebrityName} looks like.`,
+    '- Do NOT invent a different face for Person B and do NOT blend Person B\'s face with Person A\'s face.',
+  ]
+}
+
 function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
   const {
     celebrityName,
@@ -160,6 +173,7 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     mode,
     scene,
     customPrompt,
+    hasCelebrityReferenceImage,
   } = ctx
 
   const domain = sanitizeSceneText(celebrityDomain)
@@ -169,11 +183,13 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
 
   const subjectLines = [
     '- Person A (USER): taken directly from the reference image — face locked, identity preserved.',
-    `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''} — rendered as a believable celebrity likeness beside Person A.`,
+    `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''}${hasCelebrityReferenceImage ? ' — rendered from the second reference photo provided (see RULE #2 below).' : ' — rendered as a believable celebrity likeness beside Person A.'}`,
     style ? `- Celebrity look / styling for Person B only: ${style}.` : '',
     traitsLine ? `- Resemblance vibe (lighting/mood only, NOT Person A\'s face): ${traitsLine}.` : '',
     mood ? `- Scene mood / energy: ${mood}.` : '',
   ]
+
+  const celebrityBlock = hasCelebrityReferenceImage ? celebrityReferenceBlock(celebrityName) : []
 
   const requirements = [
     'REQUIREMENTS:',
@@ -194,6 +210,7 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
       '',
       ...facePreservationBlock(),
       '',
+      ...celebrityBlock,
       'USER PROMPT (MANDATORY — scene and styling, but Person A\'s face stays from reference):',
       userPrompt,
       '',
@@ -217,6 +234,7 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...facePreservationBlock(),
     '',
+    ...celebrityBlock,
     'USER SCENE BRIEF (MANDATORY — scene details, Person A\'s face still from reference):',
     `1. LOCATION / SETTING: ${location}`,
     `2. OUTFITS for both people: ${outfits}`,
@@ -285,7 +303,7 @@ async function uploadUrlToKie(fileUrl: string, apiKey: string): Promise<string |
     },
     body: JSON.stringify({
       fileUrl,
-      uploadPath: 'mon-jumeau-celebre',
+      uploadPath: 'starfusion',
       fileName: `ref-${Date.now()}.jpg`,
     }),
   })
@@ -330,7 +348,7 @@ async function uploadBase64ToKie(imageBase64: string, apiKey: string): Promise<s
     },
     body: JSON.stringify({
       base64Data,
-      uploadPath: 'mon-jumeau-celebre',
+      uploadPath: 'starfusion',
       fileName,
     }),
   })
@@ -363,7 +381,7 @@ async function resolveReferenceImageUrl(imageBase64: string, apiKey: string): Pr
 }
 
 async function createTask(
-  imageUrl: string,
+  imageUrls: string[],
   ctx: PhotoGenerationContext,
   apiKey: string
 ): Promise<string> {
@@ -380,7 +398,7 @@ async function createTask(
       model: 'nano-banana-2',
       input: {
         prompt,
-        image_input: [imageUrl],
+        image_input: imageUrls,
         aspect_ratio: 'auto',
         resolution: '2K',
         output_format: 'jpg',
@@ -438,13 +456,14 @@ Deno.serve(async (req: Request) => {
     const kieKey = Deno.env.get('KIE_API_KEY')
     if (!kieKey) throw new Error('KIE_API_KEY non configurée dans les secrets Supabase')
 
-    const { imageBase64, celebrityName, celebrityDomain, celebrityStyleDescription, celebrityTraits, funFact, generationMode, photoScene, customPrompt, sessionId, analysisId, userId, email } = await req.json() as {
+    const { imageBase64, celebrityName, celebrityDomain, celebrityStyleDescription, celebrityTraits, funFact, celebrityImageBase64, generationMode, photoScene, customPrompt, sessionId, analysisId, userId, email } = await req.json() as {
       imageBase64: string
       celebrityName: string
       celebrityDomain?: string
       celebrityStyleDescription?: string
       celebrityTraits?: string[]
       funFact?: string
+      celebrityImageBase64?: string
       generationMode?: 'presets' | 'custom'
       photoScene?: PhotoScene
       customPrompt?: string
@@ -476,6 +495,7 @@ Deno.serve(async (req: Request) => {
       mode,
       scene: mode === 'presets' ? photoScene : undefined,
       customPrompt: mode === 'custom' ? customPrompt?.trim() : undefined,
+      hasCelebrityReferenceImage: Boolean(celebrityImageBase64),
     }
 
     const sceneSummary = buildSceneSummary(generationContext)
@@ -505,7 +525,11 @@ Deno.serve(async (req: Request) => {
     }
 
     const imageUrl = await resolveReferenceImageUrl(imageBase64, kieKey)
-    const taskId = await createTask(imageUrl, generationContext, kieKey)
+    const imageUrls = [imageUrl]
+    if (celebrityImageBase64) {
+      imageUrls.push(await resolveReferenceImageUrl(celebrityImageBase64, kieKey))
+    }
+    const taskId = await createTask(imageUrls, generationContext, kieKey)
     const resultUrl = await pollTask(taskId, kieKey)
 
     const imgRes = await fetch(resultUrl)

@@ -12,10 +12,12 @@ interface SuccessScreenProps {
   generatedImage: string
   celebrity: CelebrityResult
   creditsBalance?: number
+  /** false pour le mode "Choisis ta star" — pas de score de ressemblance à afficher */
+  showMatchScore?: boolean
   onReset: () => void
 }
 
-export default function SuccessScreen({ preview, generatedImage, celebrity, creditsBalance, onReset }: SuccessScreenProps) {
+export default function SuccessScreen({ preview, generatedImage, celebrity, creditsBalance, showMatchScore = true, onReset }: SuccessScreenProps) {
   const { name, score } = celebrity
   const [shared, setShared] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
@@ -79,7 +81,7 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cred
           </span>
         </h2>
         <p className="text-[#808080] text-sm">
-          {score}% de ressemblance · Version HD sans watermark
+          {showMatchScore ? `${score}% de ressemblance · ` : ''}Version HD sans watermark
         </p>
       </motion.div>
 
@@ -210,28 +212,49 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cred
         </motion.button>
       </motion.div>
 
-      {/* ── Score badge ── */}
-      <motion.div
-        variants={item}
-        className="w-full rounded-2xl p-4 flex items-center gap-4"
-        style={{ background: 'rgba(212,175,55,0.04)', border: '1px solid rgba(212,175,55,0.15)' }}
-      >
+      {/* ── Score badge (mode "jumeau" uniquement) ── */}
+      {showMatchScore ? (
         <motion.div
-          animate={{ boxShadow: ['0 0 0 0 rgba(212,175,55,0.4)', '0 0 0 10px rgba(212,175,55,0)', '0 0 0 0 rgba(212,175,55,0.4)'] }}
-          transition={{ duration: 2.5, repeat: Infinity }}
-          className="w-14 h-14 rounded-xl flex-shrink-0 flex flex-col items-center justify-center"
-          style={{ background: 'linear-gradient(135deg,rgba(212,175,55,0.15),rgba(212,175,55,0.08))', border: '1px solid rgba(212,175,55,0.3)' }}
+          variants={item}
+          className="w-full rounded-2xl p-4 flex items-center gap-4"
+          style={{ background: 'rgba(212,175,55,0.04)', border: '1px solid rgba(212,175,55,0.15)' }}
         >
-          <span className="text-[#D4AF37] text-xl font-black leading-none">{score}</span>
-          <span className="text-[#D4AF37]/50 text-[9px] font-bold">%</span>
+          <motion.div
+            animate={{ boxShadow: ['0 0 0 0 rgba(212,175,55,0.4)', '0 0 0 10px rgba(212,175,55,0)', '0 0 0 0 rgba(212,175,55,0.4)'] }}
+            transition={{ duration: 2.5, repeat: Infinity }}
+            className="w-14 h-14 rounded-xl flex-shrink-0 flex flex-col items-center justify-center"
+            style={{ background: 'linear-gradient(135deg,rgba(212,175,55,0.15),rgba(212,175,55,0.08))', border: '1px solid rgba(212,175,55,0.3)' }}
+          >
+            <span className="text-[#D4AF37] text-xl font-black leading-none">{score}</span>
+            <span className="text-[#D4AF37]/50 text-[9px] font-bold">%</span>
+          </motion.div>
+          <div>
+            <p className="text-white text-sm font-bold">Ressemblance confirmée</p>
+            <p className="text-[#606060] text-xs mt-0.5">
+              Moins de 3% des gens dépassent 85% — tu fais partie de l&apos;élite
+            </p>
+          </div>
         </motion.div>
-        <div>
-          <p className="text-white text-sm font-bold">Ressemblance confirmée</p>
-          <p className="text-[#606060] text-xs mt-0.5">
-            Moins de 3% des gens dépassent 85% — tu fais partie de l&apos;élite
-          </p>
-        </div>
-      </motion.div>
+      ) : (
+        <motion.div
+          variants={item}
+          className="w-full rounded-2xl p-4 flex items-center gap-4"
+          style={{ background: 'rgba(168,85,247,0.05)', border: '1px solid rgba(168,85,247,0.18)' }}
+        >
+          <div
+            className="w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg,rgba(168,85,247,0.18),rgba(168,85,247,0.08))', border: '1px solid rgba(168,85,247,0.3)' }}
+          >
+            <Crown size={22} className="text-[#A855F7]" />
+          </div>
+          <div>
+            <p className="text-white text-sm font-bold">Génération réussie</p>
+            <p className="text-[#606060] text-xs mt-0.5">
+              Ta photo personnalisée avec {name} est prête
+            </p>
+          </div>
+        </motion.div>
+      )}
 
       {/* ── Crédits restants + espace ── */}
       <motion.div variants={item} className="w-full flex flex-col gap-2">

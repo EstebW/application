@@ -9,7 +9,7 @@ const KIE_API_BASE = 'https://api.kie.ai'
 const ANALYZE_MODEL = 'gemini-3-flash'
 const ANALYZE_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
 
-const ANALYZE_SYSTEM = `Tu es le moteur d'un jeu de divertissement nommé "Mon Jumeau Célèbre".
+const ANALYZE_SYSTEM = `Tu es le moteur d'un jeu de divertissement nommé "StarFusion".
 Les joueurs uploadent une photo pour découvrir à quelle star ils ressemblent — c'est un jeu fun, pas une identification officielle.
 Tu dois toujours répondre par un objet JSON valide, sans markdown ni texte autour.`
 

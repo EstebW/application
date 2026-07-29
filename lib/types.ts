@@ -40,4 +40,6 @@ export interface PhotoGenerationContext {
   mode: PhotoGenerationMode
   scene?: PhotoScene
   customPrompt?: string
+  /** true si une vraie photo de la célébrité est fournie en 2e image_input (mode "Choisis ta star") */
+  hasCelebrityReferenceImage?: boolean
 }
