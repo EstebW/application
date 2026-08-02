@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles } from 'lucide-react'
 import ProgressBar from './ProgressBar'
+import CelebrityPortrait from './CelebrityPortrait'
 import type { CelebrityResult, GenerationRequest } from '@/lib/types'
 import { callFunction, FunctionCallError } from '@/lib/functions'
 import { formatKieError, isSensitiveContentError } from '@/lib/kie-errors'
+import { getCelebrityFirstName } from '@/lib/celebrity-image'
 
 interface GenerationLoaderProps {
   preview: string
@@ -26,6 +28,7 @@ interface GenerationLoaderProps {
 
 export default function GenerationLoader({ preview, imageBase64, celebrity, celebrityImageBase64, generationRequest, sessionId, userId, email, analysisId, onComplete, onRetry, onInsufficientCredits }: GenerationLoaderProps) {
   const { name, celebrity_domain, celebrity_style_description } = celebrity
+  const firstName = getCelebrityFirstName(name)
   const [stepIndex, setStepIndex] = useState(0)
   const [progress, setProgress] = useState(0)
   const [apiError, setApiError] = useState('')
@@ -34,7 +37,7 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
 
   const steps = [
     'Préparation de la mise en scène...',
-    `Intégration de ton visage aux côtés de ${name}...`,
+    `Intégration de ton visage aux côtés de ${firstName}...`,
     'Finalisation de la photo HD...',
   ]
 
@@ -189,18 +192,13 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
           animate={{ x: [0, -6, 0] }}
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
         >
-          <div
-            className="w-28 h-28 rounded-2xl overflow-hidden relative"
-            style={{ border: '2px solid rgba(107,33,168,0.6)', boxShadow: '0 0 20px rgba(107,33,168,0.2)' }}
-          >
-            <div className="w-full h-full" style={{ background: 'linear-gradient(135deg, #2d1b69 0%, #6B21A8 100%)' }} />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-4xl font-black text-white/20">{name[0]}</span>
-            </div>
-          </div>
-          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded text-[9px] font-bold text-white bg-[#2A2A2A] whitespace-nowrap">
-            {name.toUpperCase()}
-          </div>
+          <CelebrityPortrait
+            name={name}
+            imageSrc={celebrityImageBase64}
+            size="md"
+            shape="rounded"
+            badgeLabel="first"
+          />
         </motion.div>
       </div>
 

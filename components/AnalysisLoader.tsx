@@ -19,10 +19,11 @@ interface AnalysisLoaderProps {
   preview: string
   imageBase64: string
   sessionId?: string
+  userId?: string
   onComplete: (result: CelebrityResult & { analysisId?: string }) => void
 }
 
-export default function AnalysisLoader({ preview, imageBase64, sessionId, onComplete }: AnalysisLoaderProps) {
+export default function AnalysisLoader({ preview, imageBase64, sessionId, userId, onComplete }: AnalysisLoaderProps) {
   const [stepIndex, setStepIndex] = useState(0)
   const [progress, setProgress] = useState(0)
   const [apiError, setApiError] = useState('')
@@ -53,7 +54,7 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, onComp
 
     callFunction<CelebrityResult & { analysisId?: string; error?: string }>(
       'analyze',
-      { imageBase64, sessionId }
+      { imageBase64, sessionId, userId }
     )
       .then((data) => {
         clearInterval(stepInterval)

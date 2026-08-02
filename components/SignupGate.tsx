@@ -5,12 +5,12 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, Lock, ChevronRight, Star } from 'lucide-react'
 import { callFunction } from '@/lib/functions'
 import { signUpWithEmail, signInWithEmail, formatAuthError } from '@/lib/auth'
-import { setStoredEmail } from '@/lib/session-storage'
+import { setStoredEmail, setStoredSessionId } from '@/lib/session-storage'
 
 interface SignupGateProps {
   score?: number
   sessionId?: string
-  onSuccess: (firstName: string, email: string) => void
+  onSuccess: (firstName: string, email: string, meta?: { sessionId?: string; creditsBalance?: number }) => void
 }
 
 const containerVariants = {
@@ -49,17 +49,27 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
         await signInWithEmail(email, password)
       }
 
-      if (sessionId) {
-        await callFunction('register', {
-          sessionId,
-          email: email.trim(),
-          firstName: firstName.trim() || undefined,
-          userId: user.id,
-        }).catch(() => null)
+      const reg = await callFunction<{
+        success?: boolean
+        sessionId?: string
+        creditsBalance?: number
+      }>('register', {
+        sessionId: sessionId || undefined,
+        email: email.trim(),
+        firstName: firstName.trim() || undefined,
+        userId: user.id,
+      })
+
+      if (!reg?.sessionId) {
+        throw new Error('Impossible de créer ton espace compte. Réessaie.')
       }
 
+      setStoredSessionId(reg.sessionId)
       setStoredEmail(email.trim())
-      onSuccess(firstName.trim() || 'toi', email.trim())
+      onSuccess(firstName.trim() || 'toi', email.trim(), {
+        sessionId: reg.sessionId,
+        creditsBalance: reg.creditsBalance ?? 0,
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erreur, réessaie'
       setError(formatAuthError(message))

@@ -1,21 +1,15 @@
 /**
  * Appelle une Supabase Edge Function.
- * La clé anon est publique (NEXT_PUBLIC_) — c'est attendu côté client.
- * Les secrets sensibles (KIE_API_KEY, service role) restent côté Edge Functions.
+ * Utilise le JWT utilisateur s'il est connecté (sinon la clé anon).
  */
+
+import { supabase } from '@/lib/supabase'
 
 const FUNCTIONS_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL + '/functions/v1'
 
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
-/**
- * Erreur enrichie avec le status HTTP réel et le code d'erreur métier (si fourni
- * par l'Edge Function), pour éviter toute confusion entre une vraie erreur
- * "crédits app insuffisants" (status 402 + code APP_CREDITS_INSUFFICIENT) et
- * une erreur du fournisseur IA (kie.ai) dont le message peut aussi contenir
- * des mots comme "402" ou "credit" sans rapport avec le compte de l'utilisateur.
- */
 export class FunctionCallError extends Error {
   status: number
   code?: string
@@ -32,11 +26,20 @@ export async function callFunction<T = unknown>(
   name: string,
   body?: Record<string, unknown>
 ): Promise<T> {
+  let token = ANON_KEY
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.access_token) token = session.access_token
+  } catch {
+    // fallback anon
+  }
+
   const res = await fetch(`${FUNCTIONS_URL}/${name}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${ANON_KEY}`,
+      Authorization: `Bearer ${token}`,
+      apikey: ANON_KEY,
     },
     body: body ? JSON.stringify(body) : undefined,
   })

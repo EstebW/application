@@ -3,24 +3,22 @@
 import { motion } from 'framer-motion'
 import { Check } from 'lucide-react'
 
-const STEPS = ['Photo', 'Analyse', 'Débloquer', 'Ta photo'] as const
-
 interface StepperProps {
+  labels: readonly string[]
   currentStep: number
 }
 
-export default function Stepper({ currentStep }: StepperProps) {
+export default function Stepper({ labels, currentStep }: StepperProps) {
   return (
     <div className="flex items-center justify-center w-full mb-6 px-1">
-      {STEPS.map((label, i) => {
+      {labels.map((label, i) => {
         const isCompleted = i < currentStep
         const isActive = i === currentStep
         const isUpcoming = i > currentStep
 
         return (
-          <div key={label} className="flex items-center">
+          <div key={`${label}-${i}`} className="flex items-center">
             <div className="flex flex-col items-center gap-1.5">
-              {/* Completed → solid gold + check. Active → gold ring + pulse. Upcoming → grey. */}
               <motion.div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 ${
                   isCompleted
@@ -43,7 +41,7 @@ export default function Stepper({ currentStep }: StepperProps) {
               </span>
             </div>
 
-            {i < STEPS.length - 1 && (
+            {i < labels.length - 1 && (
               <div className="w-6 sm:w-10 h-[2px] mx-1.5 sm:mx-2 bg-[#A0A0A0]/20 relative overflow-hidden rounded-full">
                 <motion.div
                   className="absolute inset-0 bg-[#D4AF37] origin-left"

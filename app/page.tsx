@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, LogIn } from 'lucide-react'
+import { ArrowLeft, LogIn, LayoutDashboard } from 'lucide-react'
 import Link from 'next/link'
 import HeroSection from '@/components/HeroSection'
 import ModeChoice from '@/components/ModeChoice'
@@ -10,6 +10,7 @@ import CustomPhotoUpload from '@/components/CustomPhotoUpload'
 import CustomCelebrityForm from '@/components/CustomCelebrityForm'
 import PhotoUploadSection from '@/components/PhotoUploadSection'
 import AnalysisLoader from '@/components/AnalysisLoader'
+import AnalysisResult from '@/components/AnalysisResult'
 import TeaserResult from '@/components/TeaserResult'
 import SignupGate from '@/components/SignupGate'
 import PaymentScreen from '@/components/PaymentScreen'
@@ -30,10 +31,11 @@ import {
   getStoredEmail,
   setHasCompletedGeneration,
 } from '@/lib/session-storage'
+import { prefetchCelebrityImage } from '@/lib/celebrity-image'
 
-// ── Deux funnels possibles :
-// 1) Mode "jumeau" (match)  : modeChoice → hero → upload → analyzing → teaser → signup → payment → customize → generating → success
-// 2) Mode "libre" (custom)  : modeChoice → customUpload → customCelebrity → signup → payment → customize → generating → success
+// ── Deux funnels :
+// 1) Match : photo → analyse → teaser flouté → (compte) → paiement → révélation jumeau → scène → génération
+// 2) Custom : photo → star → (compte) → paiement → scène → génération
 type Step =
   | 'modeChoice'
   | 'hero'
@@ -44,31 +46,79 @@ type Step =
   | 'customCelebrity'
   | 'signup'
   | 'payment'
+  | 'result'
   | 'customize'
   | 'generating'
   | 'success'
 
 type AppMode = 'match' | 'custom'
 
-function getStepperIndex(step: Step): number {
-  switch (step) {
-    case 'modeChoice':
-    case 'hero':
-    case 'upload':
-    case 'customUpload':
-      return 0
-    case 'analyzing':
-    case 'customCelebrity':
-      return 1
-    case 'teaser':
-    case 'signup':
-    case 'payment':
-    case 'customize':
-      return 2
-    case 'generating':
-    case 'success':
-      return 3
+function getStepperState(
+  step: Step,
+  userId: string | undefined,
+  creditsBalance: number,
+  appMode: AppMode | null,
+): { labels: readonly string[]; index: number } {
+  const loggedIn = Boolean(userId)
+  const onPaywall = step === 'payment' || step === 'signup'
+  const needsPay = !loggedIn || creditsBalance <= 0 || onPaywall
+
+  if (appMode === 'match') {
+    if (loggedIn && !needsPay) {
+      const labels = ['Photo', 'Analyse', 'Jumeau', 'Créa'] as const
+      const index =
+        step === 'modeChoice' || step === 'hero' || step === 'upload' ? 0
+          : step === 'analyzing' || step === 'teaser' ? 1
+            : step === 'result' ? 2
+              : 3
+      return { labels, index }
+    }
+    if (loggedIn) {
+      const labels = ['Photo', 'Analyse', 'Paiement', 'Jumeau', 'Créa'] as const
+      const index =
+        step === 'modeChoice' || step === 'hero' || step === 'upload' ? 0
+          : step === 'analyzing' || step === 'teaser' || step === 'signup' ? 1
+            : step === 'payment' ? 2
+              : step === 'result' ? 3
+                : 4
+      return { labels, index }
+    }
+    const labels = ['Photo', 'Analyse', 'Compte', 'Paiement', 'Jumeau'] as const
+    const index =
+      step === 'modeChoice' || step === 'hero' || step === 'upload' ? 0
+        : step === 'analyzing' || step === 'teaser' ? 1
+          : step === 'signup' ? 2
+            : step === 'payment' ? 3
+              : 4 // result / customize / generating / success
+    return { labels, index }
   }
+
+  // Custom / défaut
+  if (loggedIn && !needsPay) {
+    const labels = ['Photo', 'Star', 'Créa'] as const
+    const index =
+      step === 'modeChoice' || step === 'customUpload' ? 0
+        : step === 'customCelebrity' ? 1
+          : 2
+    return { labels, index }
+  }
+  if (loggedIn) {
+    const labels = ['Photo', 'Star', 'Paiement', 'Créa'] as const
+    const index =
+      step === 'modeChoice' || step === 'customUpload' ? 0
+        : step === 'customCelebrity' || step === 'signup' ? 1
+          : step === 'payment' ? 2
+            : 3
+    return { labels, index }
+  }
+  const labels = ['Photo', 'Star', 'Compte', 'Paiement', 'Créa'] as const
+  const index =
+    step === 'modeChoice' || step === 'customUpload' ? 0
+      : step === 'customCelebrity' ? 1
+        : step === 'signup' ? 2
+          : step === 'payment' ? 3
+            : 4
+  return { labels, index }
 }
 
 const slideVariants = {
@@ -151,7 +201,62 @@ export default function HomePage() {
     initSession()
   }, [refreshAccount])
 
+  // Garder l’état auth à jour (inscription / login / logout dans un autre onglet)
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user
+      if (user) {
+        setUserId(user.id)
+        if (user.email) {
+          setUserEmail(user.email)
+          setStoredEmail(user.email)
+        }
+      } else {
+        setUserId(undefined)
+      }
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
   // ── Handlers ───────────────────────────────────────────────────────────────
+
+  /** Après teaser / star : toujours passer par la page paiement (crédits → bouton « continuer » dessus). */
+  const routeToUnlock = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      setStep('signup')
+      return
+    }
+
+    setUserId(user.id)
+    if (user.email) {
+      setUserEmail(user.email)
+      setStoredEmail(user.email)
+    }
+
+    try {
+      const data = await callFunction<AccountData>('account', {
+        userId: user.id,
+        sessionId: sessionId || undefined,
+        email: user.email ?? userEmail,
+      })
+      setCreditsBalance(data.creditsBalance)
+      if (data.sessionId) {
+        setSessionId(data.sessionId)
+        setStoredSessionId(data.sessionId)
+      }
+      if (data.email) {
+        setUserEmail(data.email)
+        setStoredEmail(data.email)
+      }
+    } catch {
+      // ignore
+    }
+
+    // Ne jamais sauter cette étape — même avec des crédits déjà disponibles
+    setStep('payment')
+  }, [sessionId, userEmail])
 
   const handleSelectMatchMode = useCallback(() => {
     setAppMode('match')
@@ -183,62 +288,55 @@ export default function HomePage() {
       fun_fact: '',
     })
     setCelebrityPhoto(data.celebrityImageBase64)
-    setStep('signup')
-  }, [])
+    void routeToUnlock()
+  }, [routeToUnlock])
 
   const handleAnalyze = useCallback(() => setStep('analyzing'), [])
 
   const handleAnalysisComplete = useCallback((result: CelebrityResult & { analysisId?: string }) => {
     setCelebrity(result)
     if (result.analysisId) setAnalysisId(result.analysisId)
-    setStep('teaser')       // ← show blurred result first
+    prefetchCelebrityImage(result.name)
+    setStep('teaser')
   }, [])
 
   const handleReveal = useCallback(() => {
-    setStep('signup')
-  }, [])
+    void routeToUnlock()
+  }, [routeToUnlock])
 
-  const handleSignupComplete = useCallback(async (email?: string) => {
+  const handleSignupComplete = useCallback(async (
+    email?: string,
+    meta?: { sessionId?: string; creditsBalance?: number },
+  ) => {
     if (email) {
       setStoredEmail(email)
       setUserEmail(email)
     }
 
-    let balance = creditsBalance
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      setUserId(user.id)
-      try {
-        const data = await callFunction<AccountData>('account', {
-          userId: user.id,
-          sessionId: sessionId || undefined,
-          email: user.email ?? email,
-        })
-        balance = data.creditsBalance
-        setCreditsBalance(balance)
-        if (data.sessionId) {
-          setSessionId(data.sessionId)
-          setStoredSessionId(data.sessionId)
-        }
-        if (data.email) {
-          setUserEmail(data.email)
-          setStoredEmail(data.email)
-        }
-      } catch {
-        // ignore — continue funnel
-      }
+    if (meta?.sessionId) {
+      setSessionId(meta.sessionId)
+      setStoredSessionId(meta.sessionId)
     }
 
-    setStep(balance > 0 ? 'customize' : 'payment')
-  }, [creditsBalance, sessionId])
+    setCreditsBalance(typeof meta?.creditsBalance === 'number' ? meta.creditsBalance : 0)
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) setUserId(user.id)
+
+    setStep('payment')
+  }, [])
 
   const handlePaymentSuccess = useCallback((newBalance: number) => {
     setCreditsBalance(newBalance)
-    setStep('customize')
-  }, [])
+    setStep(appMode === 'match' ? 'result' : 'customize')
+  }, [appMode])
 
   const handleInsufficientCredits = useCallback(() => {
     setStep('payment')
+  }, [])
+
+  const handleContinueToScene = useCallback(() => {
+    setStep('customize')
   }, [])
 
   const handleSceneSubmit = useCallback((request: GenerationRequest) => {
@@ -278,7 +376,7 @@ export default function HomePage() {
   }, [])
 
   // ── Back button visibility ─────────────────────────────────────────────────
-  const noBack: Step[] = ['modeChoice', 'hero', 'analyzing', 'generating', 'signup', 'payment', 'customize', 'success']
+  const noBack: Step[] = ['modeChoice', 'hero', 'analyzing', 'generating', 'signup', 'payment', 'result', 'customize', 'success']
   const showBackButton = !noBack.includes(step)
 
   return (
@@ -329,20 +427,35 @@ export default function HomePage() {
             </motion.div>
           </div>
 
-          <Link
-            href="/login"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex-shrink-0"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#A0A0A0' }}
-          >
-            <LogIn size={13} />
-            Connexion
-          </Link>
+          {userId ? (
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex-shrink-0 max-w-[160px]"
+              style={{ background: 'rgba(212,175,55,0.1)', border: '1px solid rgba(212,175,55,0.3)', color: '#D4AF37' }}
+              title={userEmail ?? 'Mon espace'}
+            >
+              <LayoutDashboard size={13} className="flex-shrink-0" />
+              <span className="truncate">{userEmail ? userEmail.split('@')[0] : 'Mon espace'}</span>
+            </Link>
+          ) : (
+            <Link
+              href="/login"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#A0A0A0' }}
+            >
+              <LogIn size={13} />
+              Connexion
+            </Link>
+          )}
         </div>
       </header>
 
       {/* ── Stepper ── */}
       <div className="relative z-20 px-5 max-w-[390px] mx-auto w-full">
-        <Stepper currentStep={getStepperIndex(step)} />
+        {(() => {
+          const stepper = getStepperState(step, userId, creditsBalance, appMode)
+          return <Stepper labels={stepper.labels} currentStep={stepper.index} />
+        })()}
       </div>
 
       {/* ── Main ── */}
@@ -391,6 +504,7 @@ export default function HomePage() {
                 preview={photoPreview}
                 imageBase64={photoPreview}
                 sessionId={sessionId}
+                userId={userId}
                 onComplete={handleAnalysisComplete}
               />
             </motion.div>
@@ -413,7 +527,7 @@ export default function HomePage() {
               <SignupGate
                 score={appMode === 'custom' ? undefined : celebrity.score}
                 sessionId={sessionId}
-                onSuccess={(_firstName, email) => handleSignupComplete(email)}
+                onSuccess={(_firstName, email, meta) => handleSignupComplete(email, meta)}
               />
             </motion.div>
           )}
@@ -427,7 +541,20 @@ export default function HomePage() {
                 email={userEmail}
                 generationId={generationId}
                 score={appMode === 'custom' ? undefined : celebrity.score}
+                creditsBalance={creditsBalance}
                 onSuccess={handlePaymentSuccess}
+              />
+            </motion.div>
+          )}
+
+          {step === 'result' && celebrity && appMode === 'match' && (
+            <motion.div key="result" className="px-5"
+              variants={slideVariants} initial="enter" animate="center" exit="exit">
+              <AnalysisResult
+                preview={photoPreview}
+                celebrity={celebrity}
+                onGenerate={handleContinueToScene}
+                onReset={handleReset}
               />
             </motion.div>
           )}
@@ -471,6 +598,7 @@ export default function HomePage() {
                 preview={photoPreview}
                 generatedImage={generatedImage}
                 celebrity={celebrity}
+                celebrityImageSrc={celebrityPhoto || undefined}
                 creditsBalance={creditsBalance}
                 showMatchScore={appMode !== 'custom'}
                 onReset={handleReset}

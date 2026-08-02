@@ -4,16 +4,19 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Check, RefreshCw, Sparkles } from 'lucide-react'
 import GoldParticles from './GoldParticles'
+import CelebrityPortrait from './CelebrityPortrait'
 import type { CelebrityResult } from '@/lib/types'
 
 interface AnalysisResultProps {
   preview: string
   celebrity: CelebrityResult
+  /** Photo de la star (mode "Choisis ta star") */
+  celebrityImageSrc?: string
   onGenerate: () => void
   onReset: () => void
 }
 
-export default function AnalysisResult({ preview, celebrity, onGenerate, onReset }: AnalysisResultProps) {
+export default function AnalysisResult({ preview, celebrity, celebrityImageSrc, onGenerate, onReset }: AnalysisResultProps) {
   const [showParticles, setShowParticles] = useState(true)
   const { name, celebrity_domain, score, traits, fun_fact } = celebrity
 
@@ -29,7 +32,7 @@ export default function AnalysisResult({ preview, celebrity, onGenerate, onReset
 
   const itemVariants = {
     hidden: { opacity: 0, y: 24 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] } },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as const } },
   }
 
   return (
@@ -90,21 +93,15 @@ export default function AnalysisResult({ preview, celebrity, onGenerate, onReset
                 <Sparkles size={20} className="text-[#D4AF37]" />
               </motion.div>
 
-              <div className="flex flex-col items-center gap-2">
-                <div
-                  className="w-20 h-20 rounded-full overflow-hidden relative"
-                  style={{ border: '2px solid rgba(212,175,55,0.5)' }}
-                >
-                  <div
-                    className="w-full h-full"
-                    style={{ background: 'linear-gradient(135deg, #2d1b69, #6B21A8)' }}
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-2xl font-black text-white/30">{name[0]}</span>
-                  </div>
-                </div>
-                <span className="text-[10px] text-[#A0A0A0]">{name}</span>
-              </div>
+              <CelebrityPortrait
+                name={name}
+                imageSrc={celebrityImageSrc}
+                size="sm"
+                shape="circle"
+                showFirstName
+                borderColor="rgba(212,175,55,0.5)"
+                boxShadow="none"
+              />
             </div>
 
             {/* Celebrity name + score */}

@@ -21,6 +21,8 @@ alter table sessions add column if not exists user_id    uuid;
 alter table sessions add column if not exists credits_balance integer not null default 0;
 alter table sessions add column if not exists subscription_plan text;
 alter table sessions add column if not exists subscription_expires_at timestamptz;
+-- Moment où le compte auth a pris possession de la session (filtre l'historique mélangé)
+alter table sessions add column if not exists owned_at timestamptz;
 
 create index if not exists sessions_email_idx on sessions(email);
 create index if not exists sessions_user_id_idx on sessions(user_id);
@@ -51,6 +53,8 @@ create table if not exists analyses (
 
 create index if not exists analyses_session_idx on analyses(session_id);
 create index if not exists analyses_celebrity_idx on analyses(celebrity_name);
+alter table analyses add column if not exists user_id uuid;
+create index if not exists analyses_user_id_idx on analyses(user_id);
 
 -- ── generations ─────────────────────────────────────────────────
 -- Chaque tentative de génération de photo
@@ -65,6 +69,8 @@ create table if not exists generations (
 );
 
 create index if not exists generations_session_idx on generations(session_id);
+alter table generations add column if not exists user_id uuid;
+create index if not exists generations_user_id_idx on generations(user_id);
 
 -- ── payments ────────────────────────────────────────────────────
 -- Paiement pour débloquer la version HD

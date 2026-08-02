@@ -42,7 +42,7 @@ export default function TeaserResult({ celebrity, preview, onReveal }: TeaserRes
           }}>identifié !</span>
         </h2>
         <p className="text-[#808080] text-sm">
-          Inscris-toi pour découvrir qui te ressemble
+          Débloque ton résultat pour découvrir qui te ressemble
         </p>
       </motion.div>
 
@@ -153,7 +153,7 @@ export default function TeaserResult({ celebrity, preview, onReveal }: TeaserRes
                 <Lock size={14} className="text-[#D4AF37]/50" />
               </div>
               <p className="text-[#D4AF37]/50 text-[10px] font-semibold uppercase tracking-wider">
-                Inscris-toi pour révéler
+                Paye pour révéler
               </p>
             </div>
           </div>
@@ -181,13 +181,13 @@ export default function TeaserResult({ celebrity, preview, onReveal }: TeaserRes
           style={{ boxShadow: '0 8px 48px rgba(212,175,55,0.4)' }}
         >
           <Eye size={20} className="flex-shrink-0" />
-          Révéler mon jumeau célèbre
+          Débloquer mon jumeau célèbre
           <ChevronRight size={20} className="flex-shrink-0" />
         </motion.button>
 
         <p className="text-center text-[#505050] text-xs flex items-center justify-center gap-1.5">
           <Lock size={10} />
-          Gratuit · Données protégées · Sans spam
+          Accès sécurisé · Révélation + photo HD
         </p>
       </motion.div>
 

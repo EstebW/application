@@ -1,8 +1,33 @@
-import { createClient } from 'npm:@supabase/supabase-js@2'
+import { createClient, type User } from 'npm:@supabase/supabase-js@2'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+async function getAuthUser(req: Request): Promise<User | null> {
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader?.startsWith('Bearer ')) return null
+  const jwt = authHeader.slice('Bearer '.length).trim()
+  const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+  if (!jwt || jwt === anon) return null
+  const url = Deno.env.get('SUPABASE_URL')
+  if (!url || !anon) return null
+  try {
+    const client = createClient(url, anon, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+    const { data, error } = await client.auth.getUser(jwt)
+    if (error || !data.user) return null
+    return data.user
+  } catch {
+    return null
+  }
+}
+
+function bindUserId(authUser: User | null, bodyUserId?: string): string | undefined {
+  if (authUser?.id) return authUser.id
+  return bodyUserId?.trim() || undefined
 }
 
 function getErrorMessage(err: unknown): string {
@@ -19,6 +44,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const authUser = await getAuthUser(req)
     const body = await req.json() as {
       sessionId?: string
       email?: string
@@ -26,9 +52,10 @@ Deno.serve(async (req: Request) => {
       userId?: string
     }
 
-    const { sessionId, email, firstName, userId } = body
+    const userId = bindUserId(authUser, body.userId)
+    const email = authUser?.email ?? body.email
+    const { sessionId, firstName } = body
 
-    // Validate required fields — only return 400 for client errors
     if (!email?.trim()) {
       return new Response(
         JSON.stringify({ error: 'email requis' }),
@@ -37,46 +64,118 @@ Deno.serve(async (req: Request) => {
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(email.trim())) {
+    const normalizedEmail = email.trim().toLowerCase()
+    if (!emailRegex.test(normalizedEmail)) {
       return new Response(
         JSON.stringify({ error: 'Email invalide' }),
         { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Save to DB — non-blocking: if it fails, still let the user through
-    if (sessionId) {
-      try {
-        const db = createClient(
-          Deno.env.get('SUPABASE_URL')!,
-          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-          { auth: { persistSession: false } }
-        )
-
-        const { error: dbError } = await db
-          .from('sessions')
-          .update({
-            email: email.toLowerCase().trim(),
-            first_name: firstName?.trim() ?? null,
-            user_id: userId ?? null,
-          })
-          .eq('id', sessionId)
-
-        if (dbError) {
-          // Log for debugging but don't block the user
-          console.warn('[register] DB update failed (schema may be missing columns):', getErrorMessage(dbError))
-        }
-      } catch (dbErr) {
-        console.warn('[register] DB exception:', getErrorMessage(dbErr))
-        // Non-blocking — user continues regardless
-      }
-    } else {
-      console.warn('[register] No sessionId — email not persisted:', email)
+    if (!userId) {
+      return new Response(
+        JSON.stringify({ error: 'Connexion requise pour créer le compte' }),
+        { status: 401, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
     }
 
-    // Always return success if email is valid — DB persistence is best-effort
+    const db = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      { auth: { persistSession: false } }
+    )
+
+    const name = firstName?.trim() || null
+    const nowIso = new Date().toISOString()
+
+    const { data: existing } = await db
+      .from('sessions')
+      .select('id, credits_balance, owned_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (existing?.id) {
+      await db
+        .from('sessions')
+        .update({
+          email: normalizedEmail,
+          first_name: name,
+          ...(!existing.owned_at ? { owned_at: nowIso } : {}),
+        })
+        .eq('id', existing.id)
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          sessionId: existing.id,
+          creditsBalance: existing.credits_balance ?? 0,
+        }),
+        { headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (sessionId) {
+      const { data: current } = await db
+        .from('sessions')
+        .select('id, user_id')
+        .eq('id', sessionId)
+        .maybeSingle()
+
+      if (current && !current.user_id) {
+        const [a, g] = await Promise.all([
+          db.from('analyses').select('id', { count: 'exact', head: true }).eq('session_id', sessionId),
+          db.from('generations').select('id', { count: 'exact', head: true }).eq('session_id', sessionId),
+        ])
+        const dirty = (a.count ?? 0) > 0 || (g.count ?? 0) > 0
+
+        if (!dirty) {
+          await db
+            .from('sessions')
+            .update({
+              email: normalizedEmail,
+              first_name: name,
+              user_id: userId,
+              credits_balance: 0,
+              owned_at: nowIso,
+            })
+            .eq('id', sessionId)
+
+          return new Response(
+            JSON.stringify({ success: true, sessionId, creditsBalance: 0 }),
+            { headers: { ...CORS, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+    }
+
+    const { data: created, error } = await db
+      .from('sessions')
+      .insert({
+        email: normalizedEmail,
+        first_name: name,
+        user_id: userId,
+        credits_balance: 0,
+        owned_at: nowIso,
+      })
+      .select('id, credits_balance')
+      .single()
+
+    if (error || !created) {
+      console.warn('[register] create session failed:', getErrorMessage(error))
+      return new Response(
+        JSON.stringify({ error: 'Impossible de créer la session compte' }),
+        { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
+    }
+
     return new Response(
-      JSON.stringify({ success: true }),
+      JSON.stringify({
+        success: true,
+        sessionId: created.id,
+        creditsBalance: 0,
+      }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } }
     )
   } catch (err) {

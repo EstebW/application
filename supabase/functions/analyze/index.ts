@@ -137,9 +137,10 @@ Deno.serve(async (req: Request) => {
     const kieKey = Deno.env.get('KIE_API_KEY')
     if (!kieKey) throw new Error('KIE_API_KEY non configurée dans les secrets Supabase')
 
-    const { imageBase64, sessionId } = await req.json() as {
+    const { imageBase64, sessionId, userId } = await req.json() as {
       imageBase64: string
       sessionId?: string
+      userId?: string
     }
 
     if (!imageBase64) throw new Error('imageBase64 requis')
@@ -178,25 +179,55 @@ Deno.serve(async (req: Request) => {
     }
 
     let analysisId: string | undefined
-    if (sessionId) {
+    if (sessionId || userId) {
       try {
         const db = createClient(
           Deno.env.get('SUPABASE_URL')!,
           Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
           { auth: { persistSession: false } }
         )
-        const { data } = await db
-          .from('analyses')
-          .insert({
-            session_id: sessionId,
+
+        let writeSessionId = sessionId ?? null
+        if (userId) {
+          const { data: owned } = await db
+            .from('sessions')
+            .select('id')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          if (owned?.id) writeSessionId = owned.id as string
+        }
+
+        if (writeSessionId) {
+          const row: Record<string, unknown> = {
+            session_id: writeSessionId,
             celebrity_name: result.name,
             score: result.score,
             traits: result.traits,
             description: result.fun_fact ?? null,
-          })
-          .select('id')
-          .single()
-        analysisId = data?.id
+          }
+          if (userId) row.user_id = userId
+
+          const { data, error } = await db.from('analyses').insert(row).select('id').single()
+
+          if (error && userId) {
+            const { data: fallback } = await db
+              .from('analyses')
+              .insert({
+                session_id: writeSessionId,
+                celebrity_name: result.name,
+                score: result.score,
+                traits: result.traits,
+                description: result.fun_fact ?? null,
+              })
+              .select('id')
+              .single()
+            analysisId = fallback?.id
+          } else {
+            analysisId = data?.id
+          }
+        }
       } catch (dbErr) {
         console.warn('[analyze] DB insert failed:', dbErr)
       }

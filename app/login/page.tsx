@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
@@ -8,6 +8,10 @@ import { ArrowLeft, LogIn } from 'lucide-react'
 import StarField from '@/components/StarField'
 import StarFusionLogo from '@/components/StarFusionLogo'
 import { signInWithEmail, formatAuthError } from '@/lib/auth'
+import { callFunction } from '@/lib/functions'
+import type { AccountData } from '@/lib/account'
+import { setStoredEmail, setStoredSessionId, clearStoredSession } from '@/lib/session-storage'
+import { supabase } from '@/lib/supabase'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -15,6 +19,32 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [checking, setChecking] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    async function checkExistingSession() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (cancelled) return
+      if (user) {
+        try {
+          const account = await callFunction<AccountData>('account', {
+            userId: user.id,
+            email: user.email ?? undefined,
+          })
+          if (account.sessionId) setStoredSessionId(account.sessionId)
+          if (account.email) setStoredEmail(account.email)
+        } catch {
+          // still redirect — compte peut se créer au prochain appel
+        }
+        router.replace('/dashboard')
+        return
+      }
+      setChecking(false)
+    }
+    checkExistingSession()
+    return () => { cancelled = true }
+  }, [router])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -28,6 +58,20 @@ export default function LoginPage() {
 
     try {
       await signInWithEmail(email, password)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        try {
+          const account = await callFunction<AccountData>('account', {
+            userId: user.id,
+            email: user.email ?? email.trim(),
+          })
+          if (account.sessionId) setStoredSessionId(account.sessionId)
+          if (account.email) setStoredEmail(account.email)
+        } catch {
+          clearStoredSession()
+          if (user.email) setStoredEmail(user.email)
+        }
+      }
       router.push('/dashboard')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erreur de connexion'
@@ -38,6 +82,15 @@ export default function LoginPage() {
 
   const inputClass =
     'w-full bg-[#0E0E0E] border border-[#222] rounded-xl px-4 py-3.5 text-white text-sm placeholder-[#505050] focus:outline-none focus:border-[#D4AF37]/60 transition-colors'
+
+  if (checking) {
+    return (
+      <div className="relative min-h-screen bg-[#0A0A0A] flex flex-col items-center justify-center">
+        <StarField />
+        <p className="relative z-10 text-[#606060] text-sm">Vérification de ta session…</p>
+      </div>
+    )
+  }
 
   return (
     <div className="relative min-h-screen bg-[#0A0A0A] flex flex-col">

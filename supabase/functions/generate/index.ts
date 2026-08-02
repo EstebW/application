@@ -1,8 +1,33 @@
-import { createClient } from 'npm:@supabase/supabase-js@2'
+import { createClient, type User } from 'npm:@supabase/supabase-js@2'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+async function getAuthUser(req: Request): Promise<User | null> {
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader?.startsWith('Bearer ')) return null
+  const jwt = authHeader.slice('Bearer '.length).trim()
+  const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+  if (!jwt || jwt === anon) return null
+  const url = Deno.env.get('SUPABASE_URL')
+  if (!url || !anon) return null
+  try {
+    const client = createClient(url, anon, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+    const { data, error } = await client.auth.getUser(jwt)
+    if (error || !data.user) return null
+    return data.user
+  } catch {
+    return null
+  }
+}
+
+function bindUserId(authUser: User | null, bodyUserId?: string): string | undefined {
+  if (authUser?.id) return authUser.id
+  return bodyUserId?.trim() || undefined
 }
 
 const KIE_API_BASE = 'https://api.kie.ai'
@@ -80,23 +105,63 @@ function sanitizeSceneText(text: string): string {
 type DbClient = ReturnType<typeof createClient>
 type SessionRow = { id: string; credits_balance?: number | null; user_id?: string | null; email?: string | null }
 
-/** Même logique que account : userId > sessionId > email, privilégie le solde le plus haut. */
+/** Session de facturation isolée par user — refuse les sessions anonymes déjà polluées. */
 async function resolveBillingSession(
   db: DbClient,
   opts: { sessionId?: string; userId?: string; email?: string }
 ): Promise<SessionRow | null> {
   const { sessionId, userId, email } = opts
+  const normalizedEmail = email?.trim().toLowerCase() || null
+  const nowIso = new Date().toISOString()
 
   if (userId) {
-    const { data } = await db
+    const { data: owned } = await db
       .from('sessions')
       .select('id, credits_balance, user_id, email')
       .eq('user_id', userId)
-      .order('credits_balance', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (data) return data as SessionRow
+    if (owned) return owned as SessionRow
+
+    if (sessionId) {
+      const { data: anon } = await db
+        .from('sessions')
+        .select('id, credits_balance, user_id, email')
+        .eq('id', sessionId)
+        .maybeSingle()
+      if (anon && !anon.user_id) {
+        const [a, g] = await Promise.all([
+          db.from('analyses').select('id', { count: 'exact', head: true }).eq('session_id', sessionId),
+          db.from('generations').select('id', { count: 'exact', head: true }).eq('session_id', sessionId),
+        ])
+        const dirty = (a.count ?? 0) > 0 || (g.count ?? 0) > 0
+        if (!dirty) {
+          await db
+            .from('sessions')
+            .update({
+              user_id: userId,
+              owned_at: nowIso,
+              credits_balance: 0,
+              ...(normalizedEmail ? { email: normalizedEmail } : {}),
+            })
+            .eq('id', sessionId)
+          return { ...(anon as SessionRow), user_id: userId, credits_balance: 0 }
+        }
+      }
+    }
+
+    const { data: created } = await db
+      .from('sessions')
+      .insert({
+        user_id: userId,
+        email: normalizedEmail,
+        credits_balance: 0,
+        owned_at: nowIso,
+      })
+      .select('id, credits_balance, user_id, email')
+      .single()
+    return (created as SessionRow) ?? null
   }
 
   if (sessionId) {
@@ -105,30 +170,7 @@ async function resolveBillingSession(
       .select('id, credits_balance, user_id, email')
       .eq('id', sessionId)
       .maybeSingle()
-    if (data) {
-      if (userId && !data.user_id) {
-        await db.from('sessions').update({ user_id: userId }).eq('id', sessionId)
-      }
-      return data as SessionRow
-    }
-  }
-
-  if (email?.trim()) {
-    const normalized = email.trim().toLowerCase()
-    const { data } = await db
-      .from('sessions')
-      .select('id, credits_balance, user_id, email')
-      .eq('email', normalized)
-      .order('credits_balance', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (data) {
-      if (userId && !data.user_id) {
-        await db.from('sessions').update({ user_id: userId }).eq('id', data.id)
-      }
-      return data as SessionRow
-    }
+    if (data) return data as SessionRow
   }
 
   return null
@@ -177,6 +219,53 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
   ].filter((line) => line !== '')
 }
 
+/** Anti-"AI look" : photo smartphone amateur, indiscernable d'une vraie photo. */
+function photorealismBlock(): string[] {
+  return [
+    'PHOTOREALISM — AUTHENTIC AMATEUR SMARTPHONE PHOTO (highest visual priority after face locks):',
+    'Generate a photo that is completely indistinguishable from a genuine amateur smartphone picture taken in real life.',
+    'The image must NEVER look AI-generated, CGI, rendered, edited, or professionally photographed.',
+    '',
+    'STYLE:',
+    '- Authentic smartphone photography; natural candid moment.',
+    '- Slightly imperfect framing; slight handheld camera shake; tiny motion blur when appropriate.',
+    '- Natural facial expressions (not exaggerated, not perfect).',
+    '- Realistic human skin with pores, texture, small blemishes and imperfections — NO beauty filter.',
+    '- Natural eye reflections; slight phone-lens distortion; automatic smartphone HDR (mild, not overcooked).',
+    '- Mild digital noise and compression artifacts; realistic white balance; slightly inconsistent exposure.',
+    '- Natural clothing wrinkles; random real background details.',
+    '- Real-life lighting ONLY — environment light must affect subjects naturally, with genuine shadows and reflections.',
+    '- Imperfect focus consistency.',
+    '',
+    'COMPOSITION:',
+    '- Spontaneous: as if someone quickly pulled out their phone and captured a real moment without preparation.',
+    '- Must NOT feel posed or professionally composed.',
+    '',
+    'PEOPLE:',
+    '- Body proportions, hands, teeth, hair and facial features completely natural.',
+    '- Subtle human asymmetry; avoid exaggerated smiles or perfect poses.',
+    '- Hands/fingers/ears/eyes anatomically correct — no extra fingers, warped ears, or glassy doll eyes.',
+    '',
+    'CAMERA:',
+    '- Looks taken on an iPhone or recent Android smartphone, default Camera app, automatic mode.',
+    '',
+    'NEGATIVE / FORBIDDEN LOOK:',
+    '- No CGI, no AI look, no studio lighting, no cinematic lighting, no beauty filter, no glamour photography.',
+    '- No influencer aesthetic, no ultra-sharp details, no fake bokeh, no perfect symmetry, no wax/plastic skin.',
+    '- No overprocessed HDR, no unrealistic colors, no commercial / fashion / magazine photography.',
+    '- No unnatural facial expressions.',
+    '',
+    'VARIATION:',
+    '- Randomize camera angle, focal length, distance, lighting, expressions, posture, head orientation, framing, background activity, object placement, and slight imperfections so each generation feels like a different real-life moment.',
+    '- Final result should be impossible to distinguish from a genuine Snapchat / BeReal / Instagram Stories / smartphone gallery photo.',
+    '',
+    'SCENE FIDELITY — FOLLOW THE USER BRIEF LITERALLY:',
+    '- Execute the requested location, outfits, and pose EXACTLY as described. Do not substitute a generic VIP / red-carpet / yacht / gala stock scene.',
+    '- If the brief is quirky, funny, or specific, KEEP that specificity — originality is the point.',
+    '- Do not "upgrade" the scene into a cliché celebrity photoshoot unless the user asked for that.',
+  ]
+}
+
 function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
   const {
     celebrityName,
@@ -207,11 +296,11 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
   ]
 
   const requirements = [
-    'SCENE REQUIREMENTS (secondary to face locks):',
-    '- Both people clearly visible in one photorealistic photo.',
+    'SCENE REQUIREMENTS (secondary to face locks, but must still obey the brief):',
+    '- Both people clearly visible in ONE cohesive real photograph.',
     '- Natural bodies/poses; faces remain identity-locked as above.',
-    '- Tasteful, family-friendly, public-event photography.',
-    '- Single cohesive photo — not a collage, not a side-by-side split, not a face-swap glitch.',
+    '- Tasteful, family-friendly content.',
+    '- Single photo — not a collage, not a side-by-side split, not a face-swap glitch.',
     '- If anything conflicts with the face locks, DROP the conflicting detail and KEEP the faces.',
   ]
 
@@ -220,16 +309,21 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
         'FINAL MANDATORY CHECK:',
         '1) Compare Person A\'s output face to image_input[0] — must be the same person, unedited identity.',
         '2) Compare Person B\'s output face to image_input[1] — must be the same person, unedited identity.',
-        '3) If either face drifted, correct BEFORE returning. Face integrity > scene beauty.',
+        '3) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
+        '4) Does the scene match the user brief specifically (not a generic celebrity cliché)? If not, fix the scene.',
+        '5) Face integrity > scene beauty, but face locks AND amateur-phone realism AND brief fidelity are all required.',
       ]
     : [
         'FINAL MANDATORY CHECK:',
-        'Compare Person A\'s output face to image_input[0] — must look like an unedited crop of the same face. If different in any way, that is a failure: fix the face before returning.',
+        '1) Compare Person A\'s output face to image_input[0] — must look like an unedited crop of the same face.',
+        '2) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
+        '3) Does the scene match the user brief specifically? If not, fix the scene.',
+        '4) Face integrity > scene beauty, but face lock AND amateur-phone realism AND brief fidelity are all required.',
       ]
 
   const opener = dual
-    ? 'IDENTITY-PRESERVING COMPOSITE: keep BOTH reference faces exactly intact while placing Person A and Person B together in a new scene.'
-    : 'IDENTITY-PRESERVING EDIT: keep Person A\'s face exactly intact from the reference while placing them in a scene with a celebrity.'
+    ? 'IDENTITY-PRESERVING COMPOSITE: keep BOTH reference faces exactly intact while placing Person A and Person B together in a NEW scene that faithfully matches the user brief — output must look like a genuine amateur smartphone photo.'
+    : 'IDENTITY-PRESERVING EDIT: keep Person A\'s face exactly intact from the reference while placing them in a scene with a celebrity — output must look like a genuine amateur smartphone photo that faithfully matches the user brief.'
 
   if (mode === 'custom' && customPrompt) {
     const userPrompt = sanitizeSceneText(customPrompt)
@@ -238,7 +332,9 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
       '',
       ...facePreservationBlock(dual),
       '',
-      'USER SCENE PROMPT (apply to setting/outfits/pose ONLY — faces stay locked):',
+      ...photorealismBlock(),
+      '',
+      'USER SCENE PROMPT (apply to setting/outfits/pose ONLY — faces stay locked; follow literally):',
       userPrompt,
       '',
       'SUBJECTS:',
@@ -261,7 +357,9 @@ function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...facePreservationBlock(dual),
     '',
-    'USER SCENE BRIEF (setting/outfits/pose ONLY — faces stay locked):',
+    ...photorealismBlock(),
+    '',
+    'USER SCENE BRIEF (setting/outfits/pose ONLY — faces stay locked; follow literally):',
     `1. LOCATION / SETTING: ${location}`,
     `2. OUTFITS for both people: ${outfits}`,
     `3. POSE and FRAMING: ${position}`,
@@ -482,7 +580,8 @@ Deno.serve(async (req: Request) => {
     const kieKey = Deno.env.get('KIE_API_KEY')
     if (!kieKey) throw new Error('KIE_API_KEY non configurée dans les secrets Supabase')
 
-    const { imageBase64, celebrityName, celebrityDomain, celebrityStyleDescription, celebrityTraits, funFact, celebrityImageBase64, generationMode, photoScene, customPrompt, sessionId, analysisId, userId, email } = await req.json() as {
+    const authUser = await getAuthUser(req)
+    const body = await req.json() as {
       imageBase64: string
       celebrityName: string
       celebrityDomain?: string
@@ -498,6 +597,23 @@ Deno.serve(async (req: Request) => {
       userId?: string
       email?: string
     }
+
+    const {
+      imageBase64,
+      celebrityName,
+      celebrityDomain,
+      celebrityStyleDescription,
+      celebrityTraits,
+      funFact,
+      celebrityImageBase64,
+      generationMode,
+      photoScene,
+      customPrompt,
+      sessionId,
+      analysisId,
+    } = body
+    const userId = bindUserId(authUser, body.userId)
+    const email = authUser?.email ?? body.email
 
     if (!imageBase64 || !celebrityName) throw new Error('imageBase64 et celebrityName requis')
 
@@ -587,6 +703,7 @@ Deno.serve(async (req: Request) => {
             celebrity_name: celebrityName,
             unlocked: true,
             scene_summary: sceneSummary || null,
+            ...(userId ? { user_id: userId } : {}),
           })
           .select('id')
           .single()

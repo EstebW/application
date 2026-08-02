@@ -1,34 +1,109 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Download, Share2, RefreshCw, Crown, Check, LayoutDashboard } from 'lucide-react'
 import GoldParticles from './GoldParticles'
 import type { CelebrityResult } from '@/lib/types'
+import { resolveCelebrityImageUrl } from '@/lib/celebrity-image'
 
 interface SuccessScreenProps {
   preview: string
   generatedImage: string
   celebrity: CelebrityResult
+  /** Photo de la star pour le fallback côte-à-côte */
+  celebrityImageSrc?: string
   creditsBalance?: number
   /** false pour le mode "Choisis ta star" — pas de score de ressemblance à afficher */
   showMatchScore?: boolean
   onReset: () => void
 }
 
-export default function SuccessScreen({ preview, generatedImage, celebrity, creditsBalance, showMatchScore = true, onReset }: SuccessScreenProps) {
+export default function SuccessScreen({ preview, generatedImage, celebrity, celebrityImageSrc, creditsBalance, showMatchScore = true, onReset }: SuccessScreenProps) {
   const { name, score } = celebrity
   const [shared, setShared] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
+  const [fetchedCelebUrl, setFetchedCelebUrl] = useState<string | null>(null)
 
-  function handleShare() {
-    setShared(true)
-    setTimeout(() => setShared(false), 2500)
+  useEffect(() => {
+    if (celebrityImageSrc || generatedImage) return
+    let cancelled = false
+    resolveCelebrityImageUrl(name).then((url) => {
+      if (!cancelled) setFetchedCelebUrl(url)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [name, celebrityImageSrc, generatedImage])
+
+  const celebSrc = celebrityImageSrc || fetchedCelebUrl
+
+  function imageToDataUrl(src: string): string {
+    if (src.startsWith('data:')) return src
+    if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('blob:')) return src
+    return `data:image/jpeg;base64,${src}`
   }
-  function handleDownload() {
-    setDownloaded(true)
-    setTimeout(() => setDownloaded(false), 2500)
+
+  function downloadFileName(): string {
+    const slug = name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase()
+    return `starfusion-${slug || 'photo'}.jpg`
+  }
+
+  async function handleDownload() {
+    if (!generatedImage) return
+    try {
+      const src = imageToDataUrl(generatedImage)
+      const res = await fetch(src)
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = objectUrl
+      a.download = downloadFileName()
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(objectUrl)
+      setDownloaded(true)
+      setTimeout(() => setDownloaded(false), 2500)
+    } catch {
+      // Fallback: open image in new tab so the user can save it manually
+      window.open(imageToDataUrl(generatedImage), '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  async function handleShare() {
+    if (!generatedImage) return
+    try {
+      const src = imageToDataUrl(generatedImage)
+      const res = await fetch(src)
+      const blob = await res.blob()
+      const file = new File([blob], downloadFileName(), { type: blob.type || 'image/jpeg' })
+
+      if (typeof navigator.share === 'function' && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+        await navigator.share({
+          title: `Ma photo avec ${name} — StarFusion`,
+          text: `Regarde ma photo avec ${name} sur StarFusion`,
+          files: [file],
+        })
+        setShared(true)
+        setTimeout(() => setShared(false), 2500)
+        return
+      }
+
+      // Fallback: download if Web Share isn't available
+      await handleDownload()
+    } catch (err) {
+      // User cancelled share sheet — ignore
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      await handleDownload()
+    }
   }
 
   const containerVariants = {
@@ -128,10 +203,13 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cred
                   <img src={preview} alt="Toi" className="w-full h-full object-cover" />
                   <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, transparent 60%, rgba(0,0,0,0.6) 100%)' }} />
                 </div>
-                <div className="relative w-1/2 h-full" style={{ background: 'linear-gradient(160deg,#2d1b69 0%,#6B21A8 60%,#1a0533 100%)' }}>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-7xl font-black select-none" style={{ color: 'rgba(255,255,255,0.08)', fontFamily: "'Playfair Display', Georgia, serif" }}>{name[0]}</span>
-                  </div>
+                <div className="relative w-1/2 h-full bg-[#1a0533]">
+                  {celebSrc ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={celebSrc} alt={name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full animate-pulse" style={{ background: 'linear-gradient(160deg,#2d1b69 0%,#6B21A8 60%,#1a0533 100%)' }} />
+                  )}
                   <div className="absolute inset-0" style={{ background: 'linear-gradient(to left, transparent 60%, rgba(0,0,0,0.6) 100%)' }} />
                 </div>
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

@@ -6,24 +6,28 @@ interface SceneSuggestions {
   positions: string[]
 }
 
+/** Suggestions originales — drôles, décalées, mémorables (pas de clichés VIP). */
 const DOMAIN_PRESETS: { match: RegExp; suggestions: SceneSuggestions }[] = [
   {
     match: /acteur|actrice|cinéma|cinema|film|réalisat/i,
     suggestions: {
       locations: [
-        'Tapis rouge d\'une avant-première de film',
-        'Plateau de tournage avec éclairages de studio',
-        'Festival de Cannes, marches officielles',
+        'Toilettes VIP du festival, vous vous lavez les mains en silence gêné',
+        'Siège arrière d\'un Uber noir à 3h, GPS qui recalcule en boucle',
+        'File du McDo drive à Cannes, rouleaux de scénario sur le tableau de bord',
+        'Cabine d\'essayage H&M, rideau mal fermé, mannequin en carton témoin',
       ],
       outfits: [
-        'Smoking ou robe de soirée élégante',
-        'Tenue de gala avec accessoires de luxe',
-        'Look tapis rouge, style première mondiale',
+        'Smoking froissé + chaussettes Mickey qui dépassent',
+        'Peignoir d\'hôtel croisé avec un badge « EXTRA №47 »',
+        'Costumes de super-héros IKEA mal ajustés, masques sur le front',
+        'Tenue de tapis rouge… et crocs roses assortis',
       ],
       positions: [
-        'Côte à côte, bras dessus bras dessous, souriant à l\'appareil',
-        'Posant ensemble face aux photographes',
-        'Marche synchronisée sur le tapis rouge',
+        'Tu lui tends un autographe… qu\'il doit signer pour toi',
+        'Vous lisez le même script à l\'envers, très concentrés',
+        'Selfie flash parking souterrain, yeux mi-clos de surprise',
+        'Tu lui mimes sa scène culte, il te note sur 10 avec les doigts',
       ],
     },
   },
@@ -31,19 +35,22 @@ const DOMAIN_PRESETS: { match: RegExp; suggestions: SceneSuggestions }[] = [
     match: /chanteur|chanteuse|musique|rappeur|rappeuse|artiste/i,
     suggestions: {
       locations: [
-        'Scène de concert avec projecteurs et fumée',
-        'Studio d\'enregistrement avec micro et consoles',
-        'Backstage juste avant le show, ambiance intimiste',
+        'Cabine karaoke 2€ la chanson, micro collé de trop près',
+        'Rayon instruments d\'un magasin, ukulélé hors de prix à la main',
+        'File d\'attente du merch, tote bag « WORLD TOUR » encore plié',
+        'Toit d\'immeuble à minuit, enceinte Bluetooth qui crache',
       ],
       outfits: [
-        'Tenue de scène iconique, look tournée mondiale',
-        'Style streetwear luxe ou costume scénique',
-        'Outfit clip vidéo, accessoires signature',
+        'Sweats tour 2014 trop petits, numéros de places collés sur le torse',
+        'Paillettes de scène + jean dad et sandales de randonnée',
+        'Costumes blancs façon boy band, cravates de travers',
+        'Oreilles de chat LED + veste de smoking',
       ],
       positions: [
-        'Debout côte à côte, micro à la main',
-        'Photo backstage, détendus et complices',
-        'Sur scène, saluant le public ensemble',
+        'Duo air-guitare ultra sérieux face à un miroir de salle de bain',
+        'Tu tends le micro-brosse à dents, la star chuchote le refrain',
+        'Battle de danse ratée dans un couloir d\'hôtel',
+        'Vous choisirez le pire filtre TikTok ensemble, pouces en l\'air',
       ],
     },
   },
@@ -51,19 +58,22 @@ const DOMAIN_PRESETS: { match: RegExp; suggestions: SceneSuggestions }[] = [
     match: /sportif|sport|football|basket|tennis|athlète|athlete/i,
     suggestions: {
       locations: [
-        'Stade rempli de supporters, pelouse ou terrain',
-        'Podium olympique avec médailles',
-        'Vestiaire ou tunnel d\'accès au terrain',
+        'File des toilettes du stade à la mi-temps, maillots trempés',
+        'Parking du centre d\'entraînement, caddie de courses entre vous',
+        'Distributeur de boissons cassé, pièces coincées, regard caméra',
+        'Banc de touche vide sous la pluie, bâche de secours sur la tête',
       ],
       outfits: [
-        'Maillot officiel de l\'équipe ou tenue de compétition',
-        'Survêtement de club avec logo visible',
-        'Tenue de cérémonie sportive avec médaille',
+        'Ton faux maillot floqué « LÉGENDE » à côté du vrai',
+        'Survêtements assortis taille XS et XXL',
+        'Tenue de conf presse + short de foot et chaussettes montantes',
+        'Médailles en chocolat autour du cou, très fières',
       ],
       positions: [
-        'Célébration de victoire, bras levés ensemble',
-        'Photo officielle d\'équipe, épaule contre épaule',
-        'Poignée de main sportive ou accolade',
+        'Tu rates le high-five trois fois d\'affilée, la star attend',
+        'Pose « célébration iconique » mais tu as mis le mauvais genou',
+        'Comparatif biceps ridicule face à un miroir de vestiaire',
+        'Tu tiens le trophée en plastique, la star applaudit poliment',
       ],
     },
   },
@@ -71,19 +81,22 @@ const DOMAIN_PRESETS: { match: RegExp; suggestions: SceneSuggestions }[] = [
     match: /mannequin|mode|top model|fashion/i,
     suggestions: {
       locations: [
-        'Défilé de mode, podium et lumières de scène',
-        'Backstage fashion week, miroirs et lumières',
-        'Shooting éditorial en studio haute couture',
+        'Cabine d\'essayage Zara, pile de vêtements plus haute que vous',
+        'Escalator du centre commercial, pose éditoriale bloquée au milieu',
+        'File du Starbucks en trench XXL sur un pyjama à motifs',
+        'Parking souterrain, flash brutal façon paparazzi discount',
       ],
       outfits: [
-        'Pièce iconique de la collection du moment',
-        'Look avant-garde signé grande maison',
-        'Tenue de défilé, accessoires statement',
+        'Look couture parfait… baskets de gym sales',
+        'Le même manteau porté à l\'envers « volontairement »',
+        'Accessoires de luxe + sac plastique du supermarché',
+        'Lunettes XXL, un verre manquant, attitude fashion week',
       ],
       positions: [
-        'Pose éditoriale face caméra, attitude assurée',
-        'Debout côte à côte, regard caméra',
-        'Marche de défilé, synchronisés',
+        'Walk fashion ultra lent… vers les toilettes du mall',
+        'Critique d\'une vitrine comme au front row, smoothie à la main',
+        'Vous êtes coincés dans la même écharpe XXL',
+        'Pose « deadpan magazine » pendant qu\'un enfant vous photographie',
       ],
     },
   },
@@ -91,19 +104,22 @@ const DOMAIN_PRESETS: { match: RegExp; suggestions: SceneSuggestions }[] = [
 
 const DEFAULT_SUGGESTIONS: SceneSuggestions = {
   locations: [
-    'Événement VIP avec lumières dorées et fond flou',
-    'Soirée célébrités sur rooftop avec skyline',
-    'Salon de gala avec décor luxueux',
+    'Victoire d\'escape room, chronomètre à 00:01, accessoire absurde brandi',
+    'Cuisine ouverte, gâteau raté en feu (discret), extincteur prêt',
+    'Rayon IKEA canapés, vous testez le « Lithem » avec trop de sérieux',
+    'Laverie automatique 23h, panier à linge entre vous deux',
   ],
   outfits: [
-    'Tenues élégantes adaptées à l\'univers de la star',
-    'Look chic et soigné, style magazine people',
-    'Habits iconiques rappelant l\'image publique de la célébrité',
+    'Tenues chic + gilets de sauvetage fluo « au cas où »',
+    'Costumes d\'anniversaire enfant trop petits, badges prénom',
+    'Looks premium froissés genre « on a dormi dans l\'avion »',
+    'Matching pajamas soyeux + lunettes de soleil indoor',
   ],
   positions: [
-    'Côte à côte, souriant naturellement à l\'appareil',
-    'Photo posée, complices et détendus',
-    'Debout face à la caméra, bien visibles tous les deux',
+    'Serment secret hors-cadre, petit doigt croisé, regard caméra grave',
+    'Tu expliques un plan de génie avec les mains, la star doute fort',
+    'Photo souvenir comme en colonie de vacances, pouces forcés',
+    'Vous cachez un gâteau surprise derrière le dos… qui fuit',
   ],
 }
 
@@ -169,6 +185,53 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
   ].filter((line) => line !== '')
 }
 
+/** Anti-"AI look" : photo smartphone amateur, indiscernable d'une vraie photo. */
+function photorealismBlock(): string[] {
+  return [
+    'PHOTOREALISM — AUTHENTIC AMATEUR SMARTPHONE PHOTO (highest visual priority after face locks):',
+    'Generate a photo that is completely indistinguishable from a genuine amateur smartphone picture taken in real life.',
+    'The image must NEVER look AI-generated, CGI, rendered, edited, or professionally photographed.',
+    '',
+    'STYLE:',
+    '- Authentic smartphone photography; natural candid moment.',
+    '- Slightly imperfect framing; slight handheld camera shake; tiny motion blur when appropriate.',
+    '- Natural facial expressions (not exaggerated, not perfect).',
+    '- Realistic human skin with pores, texture, small blemishes and imperfections — NO beauty filter.',
+    '- Natural eye reflections; slight phone-lens distortion; automatic smartphone HDR (mild, not overcooked).',
+    '- Mild digital noise and compression artifacts; realistic white balance; slightly inconsistent exposure.',
+    '- Natural clothing wrinkles; random real background details.',
+    '- Real-life lighting ONLY — environment light must affect subjects naturally, with genuine shadows and reflections.',
+    '- Imperfect focus consistency.',
+    '',
+    'COMPOSITION:',
+    '- Spontaneous: as if someone quickly pulled out their phone and captured a real moment without preparation.',
+    '- Must NOT feel posed or professionally composed.',
+    '',
+    'PEOPLE:',
+    '- Body proportions, hands, teeth, hair and facial features completely natural.',
+    '- Subtle human asymmetry; avoid exaggerated smiles or perfect poses.',
+    '- Hands/fingers/ears/eyes anatomically correct — no extra fingers, warped ears, or glassy doll eyes.',
+    '',
+    'CAMERA:',
+    '- Looks taken on an iPhone or recent Android smartphone, default Camera app, automatic mode.',
+    '',
+    'NEGATIVE / FORBIDDEN LOOK:',
+    '- No CGI, no AI look, no studio lighting, no cinematic lighting, no beauty filter, no glamour photography.',
+    '- No influencer aesthetic, no ultra-sharp details, no fake bokeh, no perfect symmetry, no wax/plastic skin.',
+    '- No overprocessed HDR, no unrealistic colors, no commercial / fashion / magazine photography.',
+    '- No unnatural facial expressions.',
+    '',
+    'VARIATION:',
+    '- Randomize camera angle, focal length, distance, lighting, expressions, posture, head orientation, framing, background activity, object placement, and slight imperfections so each generation feels like a different real-life moment.',
+    '- Final result should be impossible to distinguish from a genuine Snapchat / BeReal / Instagram Stories / smartphone gallery photo.',
+    '',
+    'SCENE FIDELITY — FOLLOW THE USER BRIEF LITERALLY:',
+    '- Execute the requested location, outfits, and pose EXACTLY as described. Do not substitute a generic VIP / red-carpet / yacht / gala stock scene.',
+    '- If the brief is quirky, funny, or specific, KEEP that specificity — originality is the point.',
+    '- Do not "upgrade" the scene into a cliché celebrity photoshoot unless the user asked for that.',
+  ]
+}
+
 /**
  * Prompt Nano Banana 2 — scènes guidées ou prompt libre utilisateur.
  */
@@ -203,11 +266,11 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
   ]
 
   const requirements = [
-    'SCENE REQUIREMENTS (secondary to face locks):',
-    '- Both people clearly visible in one photorealistic photo.',
+    'SCENE REQUIREMENTS (secondary to face locks, but must still obey the brief):',
+    '- Both people clearly visible in ONE cohesive real photograph.',
     '- Natural bodies/poses; faces remain identity-locked as above.',
-    '- Tasteful, family-friendly, public-event photography.',
-    '- Single cohesive photo — not a collage, not a side-by-side split, not a face-swap glitch.',
+    '- Tasteful, family-friendly content.',
+    '- Single photo — not a collage, not a side-by-side split, not a face-swap glitch.',
     '- If anything conflicts with the face locks, DROP the conflicting detail and KEEP the faces.',
   ]
 
@@ -216,16 +279,21 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
         'FINAL MANDATORY CHECK:',
         '1) Compare Person A\'s output face to image_input[0] — must be the same person, unedited identity.',
         '2) Compare Person B\'s output face to image_input[1] — must be the same person, unedited identity.',
-        '3) If either face drifted, correct BEFORE returning. Face integrity > scene beauty.',
+        '3) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
+        '4) Does the scene match the user brief specifically (not a generic celebrity cliché)? If not, fix the scene.',
+        '5) Face integrity > scene beauty, but face locks AND amateur-phone realism AND brief fidelity are all required.',
       ]
     : [
         'FINAL MANDATORY CHECK:',
-        'Compare Person A\'s output face to image_input[0] — must look like an unedited crop of the same face. If different in any way, that is a failure: fix the face before returning.',
+        '1) Compare Person A\'s output face to image_input[0] — must look like an unedited crop of the same face.',
+        '2) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
+        '3) Does the scene match the user brief specifically? If not, fix the scene.',
+        '4) Face integrity > scene beauty, but face lock AND amateur-phone realism AND brief fidelity are all required.',
       ]
 
   const opener = dual
-    ? 'IDENTITY-PRESERVING COMPOSITE: keep BOTH reference faces exactly intact while placing Person A and Person B together in a new scene.'
-    : 'IDENTITY-PRESERVING EDIT: keep Person A\'s face exactly intact from the reference while placing them in a scene with a celebrity.'
+    ? 'IDENTITY-PRESERVING COMPOSITE: keep BOTH reference faces exactly intact while placing Person A and Person B together in a NEW scene that faithfully matches the user brief — output must look like a genuine amateur smartphone photo.'
+    : 'IDENTITY-PRESERVING EDIT: keep Person A\'s face exactly intact from the reference while placing them in a scene with a celebrity — output must look like a genuine amateur smartphone photo that faithfully matches the user brief.'
 
   if (mode === 'custom' && customPrompt) {
     const userPrompt = sanitizeSceneText(customPrompt)
@@ -234,7 +302,9 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
       '',
       ...facePreservationBlock(dual),
       '',
-      'USER SCENE PROMPT (apply to setting/outfits/pose ONLY — faces stay locked):',
+      ...photorealismBlock(),
+      '',
+      'USER SCENE PROMPT (apply to setting/outfits/pose ONLY — faces stay locked; follow literally):',
       userPrompt,
       '',
       'SUBJECTS:',
@@ -259,7 +329,9 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...facePreservationBlock(dual),
     '',
-    'USER SCENE BRIEF (setting/outfits/pose ONLY — faces stay locked):',
+    ...photorealismBlock(),
+    '',
+    'USER SCENE BRIEF (setting/outfits/pose ONLY — faces stay locked; follow literally):',
     `1. LOCATION / SETTING: ${location}`,
     `2. OUTFITS for both people: ${outfits}`,
     `3. POSE and FRAMING: ${position}`,
@@ -274,8 +346,8 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
 }
 
 export const CUSTOM_PROMPT_EXAMPLES = [
-  'Photo sur un yacht à Monaco au coucher de soleil, tenues blanches élégantes, champagne à la main, sourires détendus.',
-  'Selfie backstage après un concert, looks streetwear luxe, lumières colorées et ambiance électrique.',
-  'Photo officielle sur le terrain après un match, maillots de l\'équipe, célébration de victoire bras levés.',
-  'Shooting magazine sur un rooftop new-yorkais la nuit, skyline en arrière-plan, tenues chic et pose confiante.',
+  'Victoire d\'escape room à 00:01, tenues chic froissées, tu brandis une clé géante en plastique, la star applaudit trop fort.',
+  'File du McDo drive à 2h du matin en smoking, plateau sur le toit de la voiture, regards caméra ultra sérieux.',
+  'Laverie automatique un mardi soir, panier à linge entre vous, sweats tour merch assortis, pose souvenir de colonie.',
+  'Cabine karaoke 2€, micro-brosse à dents, paillettes de scène + crocs, duo hors-ton assumé.',
 ]

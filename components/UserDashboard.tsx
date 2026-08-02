@@ -20,9 +20,9 @@ import PaymentScreen from '@/components/PaymentScreen'
 import { supabase } from '@/lib/supabase'
 import { signOut } from '@/lib/auth'
 import {
-  getStoredSessionId,
   setStoredSessionId,
   setStoredEmail,
+  clearStoredSession,
 } from '@/lib/session-storage'
 
 function formatDate(iso: string) {
@@ -44,6 +44,7 @@ function planLabel(plan: string | null) {
 export default function UserDashboard() {
   const router = useRouter()
   const [account, setAccount] = useState<AccountData | null>(null)
+  const [userId, setUserId] = useState<string | undefined>()
   const [loading, setLoading] = useState(true)
   const [showPayment, setShowPayment] = useState(false)
 
@@ -58,35 +59,20 @@ export default function UserDashboard() {
         return
       }
 
+      if (!cancelled) setUserId(user.id)
+
       try {
-        const sessionId = getStoredSessionId()
-        const attempts: Array<Record<string, string>> = [
-          { userId: user.id },
-          ...(sessionId ? [{ sessionId }] : []),
-          ...(user.email ? [{ email: user.email }] : []),
-        ]
-
-        let data: AccountData | null = null
-        for (const body of attempts) {
-          try {
-            data = await callFunction<AccountData>('account', body)
-            break
-          } catch {
-            // essai suivant
-          }
-        }
-
-        if (!data) throw new Error('Compte introuvable')
+        // Toujours résoudre via l'auth user — jamais via sessionId navigateur seul
+        const data = await callFunction<AccountData>('account', {
+          userId: user.id,
+          email: user.email ?? undefined,
+        })
 
         if (cancelled) return
 
         setAccount(data)
         setStoredSessionId(data.sessionId)
         if (data.email) setStoredEmail(data.email)
-
-        if (data.generations.length === 0) {
-          router.replace('/')
-        }
       } catch {
         if (!cancelled) setAccount(null)
       } finally {
@@ -104,6 +90,7 @@ export default function UserDashboard() {
   }
 
   const handleLogout = async () => {
+    clearStoredSession()
     await signOut()
     router.push('/')
   }
@@ -125,7 +112,7 @@ export default function UserDashboard() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4 text-center px-4">
         <p className="text-[#808080] text-sm">
-          Impossible de charger ton espace. Termine d&apos;abord une génération depuis l&apos;accueil, puis reconnecte-toi.
+          Impossible de charger ton espace. Déconnecte-toi puis reconnecte-toi, ou crée un nouveau compte.
         </p>
         <Link href="/" className="text-[#D4AF37] text-sm hover:underline">
           Retour à l&apos;accueil
@@ -213,7 +200,9 @@ export default function UserDashboard() {
           style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <PaymentScreen
             sessionId={account.sessionId}
+            userId={userId}
             email={account.email ?? undefined}
+            creditsBalance={account.creditsBalance}
             onSuccess={handlePaymentSuccess}
           />
         </div>
@@ -226,7 +215,9 @@ export default function UserDashboard() {
           <span className="text-[#505050] text-xs">({account.analyses.length})</span>
         </div>
         {account.analyses.length === 0 ? (
-          <p className="text-[#505050] text-xs">Aucune analyse pour l&apos;instant.</p>
+          <p className="text-[#505050] text-xs leading-relaxed">
+            Aucune analyse sur ce compte pour l&apos;instant. Lance-en une depuis l&apos;accueil.
+          </p>
         ) : (
           <div className="space-y-2">
             {account.analyses.map((a) => (

@@ -56,20 +56,20 @@ function SceneField({
         onFocus={(e) => { e.target.style.borderColor = 'rgba(212,175,55,0.4)' }}
         onBlur={(e) => { e.target.style.borderColor = 'rgba(255,255,255,0.1)' }}
       />
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-col gap-1.5">
         {suggestions.map((s) => (
           <button
             key={s}
             type="button"
             onClick={() => onChange(s)}
-            className="text-[10px] px-2.5 py-1 rounded-full transition-colors"
+            className="text-left text-[11px] leading-snug px-3 py-2 rounded-xl transition-colors"
             style={{
               background: value === s ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)',
               border: `1px solid ${value === s ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.08)'}`,
-              color: value === s ? '#D4AF37' : '#888',
+              color: value === s ? '#D4AF37' : '#9a9a9a',
             }}
           >
-            {s.length > 42 ? s.slice(0, 40) + '…' : s}
+            {s}
           </button>
         ))}
       </div>

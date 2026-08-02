@@ -12,6 +12,8 @@ interface PaymentScreenProps {
   email?: string
   generationId?: string
   score?: number
+  /** Solde actuel — si > 0, propose de continuer sans re-payer */
+  creditsBalance?: number
   onSuccess: (creditsBalance: number) => void
 }
 
@@ -49,8 +51,8 @@ const PLANS: Plan[] = [
     pricePerCredit: '2,99€',
     color: '#A0A0A0',
     includes: [
-      '1 crédit de génération',
-      '1 photo IA avec ta star',
+      'Révélation de ton jumeau célèbre',
+      '1 crédit de génération photo IA',
       'Version HD téléchargeable',
     ],
   },
@@ -120,7 +122,7 @@ const item = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const } },
 }
 
-export default function PaymentScreen({ sessionId, userId, email, generationId, score, onSuccess }: PaymentScreenProps) {
+export default function PaymentScreen({ sessionId, userId, email, generationId, score, creditsBalance = 0, onSuccess }: PaymentScreenProps) {
   const [plan, setPlan] = useState<PlanId>('monthly')
   const [method, setMethod] = useState<PayMethod>('card')
   const [cardNumber, setCardNumber] = useState('')
@@ -197,20 +199,44 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
       <motion.div variants={item} className="text-center space-y-1">
         <h2 className="text-2xl font-black text-white"
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
-          Débloquer mon résultat
+          {score ? 'Débloque ton jumeau' : 'Débloque ta photo'}
         </h2>
         {score && (
           <p className="text-[#808080] text-sm">
             Ta ressemblance de{' '}
             <span className="text-[#D4AF37] font-bold">{score}%</span>
-            {' '}t&apos;attend
+            {' '}t&apos;attend — révèle qui c&apos;est
+          </p>
+        )}
+        {!score && (
+          <p className="text-[#808080] text-sm">
+            Choisis une offre pour générer ta photo avec ta star
           </p>
         )}
       </motion.div>
 
+      {creditsBalance > 0 && (
+        <motion.button
+          variants={item}
+          type="button"
+          onClick={() => onSuccess(creditsBalance)}
+          className="w-full rounded-2xl py-3.5 px-4 text-sm font-bold text-[#D4AF37] transition-colors"
+          style={{
+            background: 'rgba(212,175,55,0.08)',
+            border: '1.5px solid rgba(212,175,55,0.35)',
+          }}
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+        >
+          Continuer avec mes {creditsBalance} crédit{creditsBalance > 1 ? 's' : ''}
+        </motion.button>
+      )}
+
       {/* ── Sélecteur de plan ── */}
       <motion.div variants={item} className="space-y-2.5">
-        <p className="text-[#606060] text-xs uppercase tracking-widest font-semibold">Choisis ton offre</p>
+        <p className="text-[#606060] text-xs uppercase tracking-widest font-semibold">
+          {creditsBalance > 0 ? 'Ou recharge ton solde' : 'Choisis ton offre'}
+        </p>
 
         {PLANS.map((p) => {
           const Icon = p.icon
