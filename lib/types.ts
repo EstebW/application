@@ -1,3 +1,7 @@
+import type { CelebrityHeightConfidence } from './height'
+
+export type { CelebrityHeightConfidence }
+
 export interface CelebrityResult {
   /** Nom complet de la célébrité (ex: "Ryan Gosling") */
   name: string
@@ -21,15 +25,53 @@ export interface PhotoScene {
 
 export type PhotoGenerationMode = 'presets' | 'custom'
 
+/**
+ * Approche de création, proposée uniquement dans le parcours « Choisis ta star ».
+ * - full_generation : on invente une nouvelle scène, la photo user sert de référence d'identité.
+ * - photo_edit      : la photo user est la photo de base immuable, on y ajoute la star.
+ *
+ * Compatibilité : les générations créées avant cette fonctionnalité (et tout le parcours
+ * « jumeau célèbre ») n'ont pas de creationMode et sont traitées comme 'full_generation'.
+ *
+ * À ne pas confondre avec PhotoGenerationMode, qui décrit la façon de saisir la scène.
+ */
+export type CelebrityCreationMode = 'full_generation' | 'photo_edit'
+
+export const DEFAULT_CREATION_MODE: CelebrityCreationMode = 'full_generation'
+
+/** Interaction souhaitée entre l'utilisateur et la star — toujours facultative. */
+export interface InteractionOption {
+  id: string
+  label: string
+  /** Formulation envoyée au modèle (anglais, alignée sur le reste du prompt) */
+  prompt: string
+}
+
 /** Choix utilisateur avant génération : scènes guidées ou prompt libre */
 export interface GenerationRequest {
   mode: PhotoGenerationMode
+  creationMode?: CelebrityCreationMode
   photoScene?: PhotoScene
   customPrompt?: string
+  /** Facultatif — n'autorise jamais à contourner la préservation d'identité */
+  interaction?: string
+}
+
+/**
+ * Contrainte de taille — parcours « Choisis ta star » uniquement.
+ * L'utilisateur ne renseigne QUE sa propre taille ; celle de la star est
+ * résolue côté serveur à partir de son identifiant.
+ */
+export interface HeightContext {
+  /** Saisie utilisateur, en centimètres (120–220) */
+  userHeightCm?: number
+  /** Résolue côté serveur — null si aucune source fiable */
+  celebrityHeightCm?: number | null
+  celebrityHeightConfidence?: CelebrityHeightConfidence
 }
 
 /** Contexte complet transmis à Nano Banana 2 pour la génération */
-export interface PhotoGenerationContext {
+export interface PhotoGenerationContext extends HeightContext {
   celebrityName: string
   celebrityDomain: string
   celebrityStyleDescription?: string
@@ -38,8 +80,11 @@ export interface PhotoGenerationContext {
   /** Anecdote fun — aide à fixer l'ambiance */
   funFact?: string
   mode: PhotoGenerationMode
+  /** Absent = 'full_generation' (générations historiques) */
+  creationMode?: CelebrityCreationMode
   scene?: PhotoScene
   customPrompt?: string
+  interaction?: string
   /** true si une vraie photo de la célébrité est fournie en 2e image_input (mode "Choisis ta star") */
   hasCelebrityReferenceImage?: boolean
 }

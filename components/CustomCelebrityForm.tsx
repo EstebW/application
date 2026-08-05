@@ -3,10 +3,23 @@
 import { useRef, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, Sparkles, ImagePlus, X } from 'lucide-react'
+import UserHeightField from './UserHeightField'
+import { parseUserHeightCm } from '@/lib/height'
 
 interface CustomCelebrityFormProps {
   preview: string
-  onSubmit: (data: { name: string; domain: string; celebrityImageBase64: string }) => void
+  /** Valeurs déjà saisies — restaurées lors d'un retour en arrière */
+  initialName?: string
+  initialDomain?: string
+  initialPhoto?: string
+  /** Taille déjà connue (saisie précédente ou profil) */
+  initialHeightCm?: number
+  onSubmit: (data: {
+    name: string
+    domain: string
+    celebrityImageBase64: string
+    userHeightCm: number
+  }) => void
 }
 
 const DOMAINS = ['Acteur·rice', 'Chanteur·se', 'Sportif·ve', 'Mannequin', 'Autre']
@@ -20,13 +33,22 @@ const up = {
   show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as const } },
 }
 
-export default function CustomCelebrityForm({ preview, onSubmit }: CustomCelebrityFormProps) {
-  const [name, setName] = useState('')
-  const [domain, setDomain] = useState<string>('')
-  const [celebrityPhoto, setCelebrityPhoto] = useState('')
+export default function CustomCelebrityForm({
+  preview,
+  initialName,
+  initialDomain,
+  initialPhoto,
+  initialHeightCm,
+  onSubmit,
+}: CustomCelebrityFormProps) {
+  const [name, setName] = useState(initialName ?? '')
+  const [domain, setDomain] = useState<string>(initialDomain ?? '')
+  const [celebrityPhoto, setCelebrityPhoto] = useState(initialPhoto ?? '')
+  const [heightInput, setHeightInput] = useState(initialHeightCm ? String(initialHeightCm) : '')
   const celebrityPhotoRef = useRef<HTMLInputElement>(null)
 
-  const canContinue = name.trim().length >= 2 && !!celebrityPhoto
+  const userHeightCm = parseUserHeightCm(heightInput)
+  const canContinue = name.trim().length >= 2 && !!celebrityPhoto && userHeightCm !== null
 
   const handleCelebrityFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return
@@ -38,8 +60,8 @@ export default function CustomCelebrityForm({ preview, onSubmit }: CustomCelebri
   }, [])
 
   function handleSubmit() {
-    if (!canContinue) return
-    onSubmit({ name: name.trim(), domain, celebrityImageBase64: celebrityPhoto })
+    if (!canContinue || userHeightCm === null) return
+    onSubmit({ name: name.trim(), domain, celebrityImageBase64: celebrityPhoto, userHeightCm })
   }
 
   return (
@@ -48,8 +70,12 @@ export default function CustomCelebrityForm({ preview, onSubmit }: CustomCelebri
       <motion.div variants={up} className="flex justify-center">
         <div className="w-20 h-20 rounded-2xl overflow-hidden" style={{ border: '2px solid rgba(168,85,247,0.4)' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="Toi" className="w-full h-full object-cover" />
+          <img src={preview} alt="Ta photo" className="w-full h-full object-cover" />
         </div>
+      </motion.div>
+
+      <motion.div variants={up} className="w-full">
+        <UserHeightField value={heightInput} onChange={setHeightInput} />
       </motion.div>
 
       <motion.div variants={up} className="text-center space-y-2">

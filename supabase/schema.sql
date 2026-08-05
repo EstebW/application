@@ -23,9 +23,34 @@ alter table sessions add column if not exists subscription_plan text;
 alter table sessions add column if not exists subscription_expires_at timestamptz;
 -- Moment où le compte auth a pris possession de la session (filtre l'historique mélangé)
 alter table sessions add column if not exists owned_at timestamptz;
+-- Taille déclarée par l'utilisateur (parcours « Choisis ta star ») — préremplissage
+alter table sessions add column if not exists height_cm integer;
+alter table sessions drop constraint if exists sessions_height_cm_check;
+alter table sessions add constraint sessions_height_cm_check
+  check (height_cm is null or height_cm between 120 and 220);
 
 create index if not exists sessions_email_idx on sessions(email);
 create index if not exists sessions_user_id_idx on sessions(user_id);
+
+-- ── celebrity_heights ───────────────────────────────────────────
+-- Fiche taille par célébrité : base + cache (y compris cache négatif).
+-- Alimentée côté serveur (Wikidata puis Wikipédia), jamais depuis le client.
+create table if not exists celebrity_heights (
+  celebrity_id    text primary key,   -- slug stable dérivé du nom
+  display_name    text not null,
+  height_cm       integer check (height_cm is null or height_cm between 120 and 260),
+  source_url      text,
+  verified_at     timestamptz,
+  confidence      text not null default 'unknown'
+                    check (confidence in ('verified', 'probable', 'unknown')),
+  manual_override boolean not null default false,
+  lookup_attempts integer not null default 0,
+  last_attempt_at timestamptz,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create index if not exists celebrity_heights_confidence_idx on celebrity_heights(confidence);
 
 -- ── credit_transactions ─────────────────────────────────────────
 create table if not exists credit_transactions (
@@ -72,6 +97,12 @@ create index if not exists generations_session_idx on generations(session_id);
 alter table generations add column if not exists user_id uuid;
 create index if not exists generations_user_id_idx on generations(user_id);
 
+-- Mode de création (parcours « Choisis ta star ») : null = full_generation (historique)
+alter table generations add column if not exists creation_mode text;
+alter table generations drop constraint if exists generations_creation_mode_check;
+alter table generations add constraint generations_creation_mode_check
+  check (creation_mode is null or creation_mode in ('full_generation', 'photo_edit'));
+
 -- ── payments ────────────────────────────────────────────────────
 -- Paiement pour débloquer la version HD
 create table if not exists payments (
@@ -100,6 +131,8 @@ alter table analyses   enable row level security;
 alter table generations enable row level security;
 alter table payments   enable row level security;
 alter table credit_transactions enable row level security;
+-- Aucune policy sur celebrity_heights : table serveur uniquement (service role)
+alter table celebrity_heights enable row level security;
 
 -- Politique : INSERT ouvert (la clé anon peut créer des lignes)
 create policy "insert_sessions"    on sessions    for insert with check (true);

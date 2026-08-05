@@ -15,6 +15,9 @@ export interface Database {
           credits_balance: number
           subscription_plan: string | null
           subscription_expires_at: string | null
+          owned_at: string | null
+          /** Taille déclarée par l'utilisateur, en centimètres */
+          height_cm: number | null
         }
         Insert: {
           id?: string
@@ -27,8 +30,40 @@ export interface Database {
           credits_balance?: number
           subscription_plan?: string | null
           subscription_expires_at?: string | null
+          owned_at?: string | null
+          height_cm?: number | null
         }
         Update: Partial<Database['public']['Tables']['sessions']['Insert']>
+        Relationships: []
+      }
+      celebrity_heights: {
+        Row: {
+          celebrity_id: string
+          display_name: string
+          height_cm: number | null
+          source_url: string | null
+          verified_at: string | null
+          confidence: 'verified' | 'probable' | 'unknown'
+          manual_override: boolean
+          lookup_attempts: number
+          last_attempt_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          celebrity_id: string
+          display_name: string
+          height_cm?: number | null
+          source_url?: string | null
+          verified_at?: string | null
+          confidence?: 'verified' | 'probable' | 'unknown'
+          manual_override?: boolean
+          lookup_attempts?: number
+          last_attempt_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['celebrity_heights']['Insert']>
         Relationships: []
       }
       analyses: {

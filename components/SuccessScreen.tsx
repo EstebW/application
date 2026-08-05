@@ -17,12 +17,15 @@ interface SuccessScreenProps {
   creditsBalance?: number
   /** false pour le mode "Choisis ta star" — pas de score de ressemblance à afficher */
   showMatchScore?: boolean
+  /** Relance une génération en gardant star, mode, photo source et options */
+  onRegenerate?: () => void
   onReset: () => void
 }
 
-export default function SuccessScreen({ preview, generatedImage, celebrity, celebrityImageSrc, creditsBalance, showMatchScore = true, onReset }: SuccessScreenProps) {
+export default function SuccessScreen({ preview, generatedImage, celebrity, celebrityImageSrc, creditsBalance, showMatchScore = true, onRegenerate, onReset }: SuccessScreenProps) {
   const { name, score } = celebrity
   const [shared, setShared] = useState(false)
+  const [shareLabel, setShareLabel] = useState('Partagé !')
   const [downloaded, setDownloaded] = useState(false)
   const [fetchedCelebUrl, setFetchedCelebUrl] = useState<string | null>(null)
 
@@ -78,31 +81,99 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
     }
   }
 
+  function flashShare(label: string) {
+    setShareLabel(label)
+    setShared(true)
+    setTimeout(() => setShared(false), 2800)
+  }
+
+  async function getImageBlob(): Promise<Blob> {
+    const src = imageToDataUrl(generatedImage)
+    const res = await fetch(src)
+    const blob = await res.blob()
+    const type = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+    return blob.type === type ? blob : new Blob([blob], { type })
+  }
+
+  async function blobAsPng(blob: Blob): Promise<Blob> {
+    if (blob.type === 'image/png') return blob
+    const bitmap = await createImageBitmap(blob)
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('canvas unavailable')
+    ctx.drawImage(bitmap, 0, 0)
+    bitmap.close()
+    const png = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), 'image/png')
+    )
+    if (!png) throw new Error('png encode failed')
+    return png
+  }
+
+  async function copyImageToClipboard(blob: Blob): Promise<boolean> {
+    if (!navigator.clipboard || typeof ClipboardItem === 'undefined') return false
+    try {
+      const png = await blobAsPng(blob)
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+      return true
+    } catch {
+      try {
+        const type = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+        await navigator.clipboard.write([new ClipboardItem({ [type]: blob })])
+        return true
+      } catch {
+        return false
+      }
+    }
+  }
+
   async function handleShare() {
     if (!generatedImage) return
-    try {
-      const src = imageToDataUrl(generatedImage)
-      const res = await fetch(src)
-      const blob = await res.blob()
-      const file = new File([blob], downloadFileName(), { type: blob.type || 'image/jpeg' })
+    const title = `Ma photo avec ${name} — StarFusion`
+    const text = `Regarde ma photo avec ${name} sur StarFusion`
 
-      if (typeof navigator.share === 'function' && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
-        await navigator.share({
-          title: `Ma photo avec ${name} — StarFusion`,
-          text: `Regarde ma photo avec ${name} sur StarFusion`,
-          files: [file],
-        })
-        setShared(true)
-        setTimeout(() => setShared(false), 2500)
+    try {
+      const blob = await getImageBlob()
+      const mime = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+      const file = new File([blob], downloadFileName().replace(/\.jpg$/i, mime.includes('png') ? '.png' : '.jpg'), {
+        type: mime,
+      })
+
+      // 1) Feuille de partage native avec le fichier (mobile / quelques desktop)
+      if (typeof navigator.share === 'function') {
+        const payloadWithFiles = { title, text, files: [file] }
+        if (!navigator.canShare || navigator.canShare(payloadWithFiles)) {
+          try {
+            await navigator.share(payloadWithFiles)
+            flashShare('Partagé !')
+            return
+          } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') return
+            // sinon on tente sans fichier
+          }
+        }
+
+        // 2) Partage texte seul (utile si les fichiers ne sont pas supportés)
+        try {
+          await navigator.share({ title, text })
+          flashShare('Partagé !')
+          return
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') return
+        }
+      }
+
+      // 3) Desktop : copier l'image dans le presse-papiers (pas de téléchargement)
+      if (await copyImageToClipboard(blob)) {
+        flashShare('Photo copiée !')
         return
       }
 
-      // Fallback: download if Web Share isn't available
-      await handleDownload()
-    } catch (err) {
-      // User cancelled share sheet — ignore
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      await handleDownload()
+      flashShare('Partage indisponible')
+    } catch {
+      flashShare('Partage indisponible')
     }
   }
 
@@ -279,7 +350,7 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
           <AnimatePresence mode="wait">
             {shared ? (
               <motion.span key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-2 text-[#D4AF37]">
-                <Check size={16} /> Partagé !
+                <Check size={16} /> {shareLabel}
               </motion.span>
             ) : (
               <motion.span key="sh" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-2">
@@ -343,6 +414,22 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
             {' '}pour de nouvelles générations
           </p>
         )}
+        {onRegenerate && (
+          <button
+            type="button"
+            onClick={onRegenerate}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
+            style={{
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: '#A0A0A0',
+            }}
+          >
+            <RefreshCw size={15} />
+            Régénérer avec les mêmes réglages
+          </button>
+        )}
+
         <Link
           href="/dashboard"
           className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold"

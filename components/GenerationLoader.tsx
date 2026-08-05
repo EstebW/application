@@ -5,10 +5,12 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles } from 'lucide-react'
 import ProgressBar from './ProgressBar'
 import CelebrityPortrait from './CelebrityPortrait'
-import type { CelebrityResult, GenerationRequest } from '@/lib/types'
+import type { CelebrityCreationMode, CelebrityResult, GenerationRequest } from '@/lib/types'
+import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { callFunction, FunctionCallError } from '@/lib/functions'
 import { formatKieError, isSensitiveContentError } from '@/lib/kie-errors'
 import { getCelebrityFirstName } from '@/lib/celebrity-image'
+import { celebrityIdFromName } from '@/lib/height'
 
 interface GenerationLoaderProps {
   preview: string
@@ -17,6 +19,10 @@ interface GenerationLoaderProps {
   /** Vraie photo de la célébrité importée par l'utilisateur (mode "Choisis ta star") */
   celebrityImageBase64?: string
   generationRequest: GenerationRequest
+  /** photo_edit : imageBase64 est la photo de base, pas une simple référence de visage */
+  creationMode?: CelebrityCreationMode
+  /** Parcours « Choisis ta star » uniquement — la taille de la star est résolue côté serveur */
+  userHeightCm?: number
   sessionId?: string
   userId?: string
   email?: string
@@ -26,20 +32,29 @@ interface GenerationLoaderProps {
   onInsufficientCredits?: () => void
 }
 
-export default function GenerationLoader({ preview, imageBase64, celebrity, celebrityImageBase64, generationRequest, sessionId, userId, email, analysisId, onComplete, onRetry, onInsufficientCredits }: GenerationLoaderProps) {
+export default function GenerationLoader({ preview, imageBase64, celebrity, celebrityImageBase64, generationRequest, creationMode, userHeightCm, sessionId, userId, email, analysisId, onComplete, onRetry, onInsufficientCredits }: GenerationLoaderProps) {
   const { name, celebrity_domain, celebrity_style_description } = celebrity
   const firstName = getCelebrityFirstName(name)
+  const resolvedCreationMode =
+    creationMode ?? generationRequest.creationMode ?? DEFAULT_CREATION_MODE
+  const isPhotoEdit = resolvedCreationMode === 'photo_edit'
   const [stepIndex, setStepIndex] = useState(0)
   const [progress, setProgress] = useState(0)
   const [apiError, setApiError] = useState('')
   const [apiErrorCode, setApiErrorCode] = useState<string | undefined>()
   const called = useRef(false)
 
-  const steps = [
-    'Préparation de la mise en scène...',
-    `Intégration de ton visage aux côtés de ${firstName}...`,
-    'Finalisation de la photo HD...',
-  ]
+  const steps = isPhotoEdit
+    ? [
+        'Analyse de ta photo d\'origine...',
+        `Intégration de ${firstName} dans ta photo...`,
+        'Finalisation de la photo HD...',
+      ]
+    : [
+        'Préparation de la mise en scène...',
+        `Intégration de ton visage aux côtés de ${firstName}...`,
+        'Finalisation de la photo HD...',
+      ]
 
   useEffect(() => {
     if (called.current) return
@@ -71,8 +86,15 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
         funFact: celebrity.fun_fact,
         celebrityImageBase64,
         generationMode: generationRequest.mode,
-        photoScene: generationRequest.photoScene,
+        creationMode: resolvedCreationMode,
+        // photo_edit : la scène est la photo elle-même, le backend refuse photoScene.
+        photoScene: isPhotoEdit ? undefined : generationRequest.photoScene,
         customPrompt: generationRequest.customPrompt,
+        interaction: generationRequest.interaction,
+        // Le backend ne fait pas confiance à celebrityId : il le recalcule à
+        // partir du nom pour retrouver la fiche taille de la star.
+        celebrityId: celebrityIdFromName(name),
+        userHeightCm,
         sessionId,
         userId,
         email,
@@ -210,7 +232,8 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
             <p className="text-[#A0A0A0] text-xs leading-relaxed max-w-xs mx-auto">
               {apiError}
             </p>
-            {isSensitiveContentError(apiError) && onRetry && (
+            {/* Toujours proposer de relancer : la photo importée et les choix sont conservés. */}
+            {onRetry && apiErrorCode !== 'APP_CREDITS_INSUFFICIENT' && (
               <motion.button
                 onClick={onRetry}
                 className="mt-2 px-5 py-2.5 rounded-xl text-sm font-semibold"
@@ -222,7 +245,11 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
-                Modifier la mise en scène
+                {isSensitiveContentError(apiError)
+                  ? 'Modifier la mise en scène'
+                  : isPhotoEdit
+                    ? 'Réessayer ou changer de photo'
+                    : 'Réessayer'}
               </motion.button>
             )}
             {apiErrorCode === 'APP_CREDITS_INSUFFICIENT' && onInsufficientCredits && (

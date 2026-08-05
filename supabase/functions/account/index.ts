@@ -41,6 +41,7 @@ type SessionRow = {
   subscription_plan?: string | null
   subscription_expires_at?: string | null
   owned_at?: string | null
+  height_cm?: number | null
   created_at?: string | null
   [key: string]: unknown
 }
@@ -316,6 +317,9 @@ Deno.serve(async (req: Request) => {
         creditsBalance,
         subscriptionPlan: primary.subscription_plan,
         subscriptionExpiresAt: primary.subscription_expires_at,
+        // Prérempli le champ de taille du parcours « Choisis ta star ».
+        // undefined tant que la colonne n'existe pas (migration non appliquée).
+        heightCm: typeof primary.height_cm === 'number' ? primary.height_cm : null,
         analyses: analyses.map(({ session_id: _s, user_id: _u, ...rest }) => rest),
         generations: generations.map(({ session_id: _s, user_id: _u, ...rest }) => rest),
         transactions: transactionsRes.error ? [] : (transactionsRes.data ?? []),

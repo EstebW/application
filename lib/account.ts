@@ -14,6 +14,8 @@ export interface AccountGeneration {
   scene_summary: string | null
   created_at: string
   analysis_id: string | null
+  /** null pour les générations créées avant l'ajout du choix de mode */
+  creation_mode?: 'full_generation' | 'photo_edit' | null
 }
 
 export interface AccountTransaction {
@@ -30,6 +32,8 @@ export interface AccountData {
   creditsBalance: number
   subscriptionPlan: string | null
   subscriptionExpiresAt: string | null
+  /** Taille déclarée — absente tant que l'utilisateur n'a pas fait le parcours « Choisis ta star » */
+  heightCm?: number | null
   analyses: AccountAnalysis[]
   generations: AccountGeneration[]
   transactions: AccountTransaction[]

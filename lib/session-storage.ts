@@ -1,6 +1,9 @@
+import { isValidUserHeightCm } from './height'
+
 const SESSION_KEY = 'mjc_session_id'
 const EMAIL_KEY = 'mjc_email'
 const HAS_GENERATION_KEY = 'mjc_has_generation'
+const USER_HEIGHT_KEY = 'mjc_user_height_cm'
 
 export function getStoredSessionId(): string | null {
   if (typeof window === 'undefined') return null
@@ -32,9 +35,25 @@ export function setHasCompletedGeneration() {
   localStorage.setItem(HAS_GENERATION_KEY, '1')
 }
 
+/** Taille déclarée — préremplit le champ lors des parcours suivants. */
+export function getStoredUserHeightCm(): number | null {
+  if (typeof window === 'undefined') return null
+  const raw = localStorage.getItem(USER_HEIGHT_KEY)
+  if (!raw) return null
+  const value = Number(raw)
+  return isValidUserHeightCm(value) ? value : null
+}
+
+export function setStoredUserHeightCm(heightCm: number) {
+  if (typeof window === 'undefined') return
+  if (!isValidUserHeightCm(heightCm)) return
+  localStorage.setItem(USER_HEIGHT_KEY, String(heightCm))
+}
+
 export function clearStoredSession() {
   if (typeof window === 'undefined') return
   localStorage.removeItem(SESSION_KEY)
   localStorage.removeItem(EMAIL_KEY)
   localStorage.removeItem(HAS_GENERATION_KEY)
+  localStorage.removeItem(USER_HEIGHT_KEY)
 }

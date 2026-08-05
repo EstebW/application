@@ -20,7 +20,10 @@ import SuccessScreen from '@/components/SuccessScreen'
 import Stepper from '@/components/Stepper'
 import StarField from '@/components/StarField'
 import StarFusionLogo from '@/components/StarFusionLogo'
-import type { CelebrityResult, GenerationRequest } from '@/lib/types'
+import CreationModeChoice from '@/components/CreationModeChoice'
+import BasePhotoUpload from '@/components/BasePhotoUpload'
+import type { CelebrityCreationMode, CelebrityResult, GenerationRequest } from '@/lib/types'
+import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { callFunction } from '@/lib/functions'
 import type { AccountData } from '@/lib/account'
 import { supabase } from '@/lib/supabase'
@@ -30,12 +33,15 @@ import {
   setStoredEmail,
   getStoredEmail,
   setHasCompletedGeneration,
+  getStoredUserHeightCm,
+  setStoredUserHeightCm,
 } from '@/lib/session-storage'
+import { isValidUserHeightCm } from '@/lib/height'
 import { prefetchCelebrityImage } from '@/lib/celebrity-image'
 
 // ── Deux funnels :
 // 1) Match : photo → analyse → teaser flouté → (compte) → paiement → révélation jumeau → scène → génération
-// 2) Custom : photo → star → (compte) → paiement → scène → génération
+// 2) Custom : photo → star → mode de création → (photo de base) → (compte) → paiement → scène → génération
 type Step =
   | 'modeChoice'
   | 'hero'
@@ -44,6 +50,8 @@ type Step =
   | 'teaser'
   | 'customUpload'
   | 'customCelebrity'
+  | 'creationChoice'
+  | 'basePhoto'
   | 'signup'
   | 'payment'
   | 'result'
@@ -93,30 +101,34 @@ function getStepperState(
     return { labels, index }
   }
 
-  // Custom / défaut
+  // Custom / défaut — « Mode » = choix créer une nouvelle photo / ajouter la star
+  const onModeSteps = step === 'creationChoice' || step === 'basePhoto'
+
   if (loggedIn && !needsPay) {
-    const labels = ['Photo', 'Star', 'Créa'] as const
+    const labels = ['Photo', 'Star', 'Mode', 'Créa'] as const
     const index =
       step === 'modeChoice' || step === 'customUpload' ? 0
         : step === 'customCelebrity' ? 1
-          : 2
-    return { labels, index }
-  }
-  if (loggedIn) {
-    const labels = ['Photo', 'Star', 'Paiement', 'Créa'] as const
-    const index =
-      step === 'modeChoice' || step === 'customUpload' ? 0
-        : step === 'customCelebrity' || step === 'signup' ? 1
-          : step === 'payment' ? 2
+          : onModeSteps ? 2
             : 3
     return { labels, index }
   }
-  const labels = ['Photo', 'Star', 'Compte', 'Paiement', 'Créa'] as const
+  if (loggedIn) {
+    const labels = ['Photo', 'Star', 'Mode', 'Paiement', 'Créa'] as const
+    const index =
+      step === 'modeChoice' || step === 'customUpload' ? 0
+        : step === 'customCelebrity' ? 1
+          : onModeSteps || step === 'signup' ? 2
+            : step === 'payment' ? 3
+              : 4
+    return { labels, index }
+  }
+  const labels = ['Photo', 'Star', 'Mode', 'Compte', 'Paiement'] as const
   const index =
     step === 'modeChoice' || step === 'customUpload' ? 0
       : step === 'customCelebrity' ? 1
-        : step === 'signup' ? 2
-          : step === 'payment' ? 3
+        : onModeSteps ? 2
+          : step === 'signup' ? 3
             : 4
   return { labels, index }
 }
@@ -133,6 +145,12 @@ export default function HomePage() {
   const [photoPreview, setPhotoPreview] = useState('')
   const [celebrity, setCelebrity] = useState<CelebrityResult | null>(null)
   const [celebrityPhoto, setCelebrityPhoto] = useState('')
+  // Parcours « Choisis ta star » uniquement — le funnel « jumeau » reste en full_generation.
+  const [creationMode, setCreationMode] = useState<CelebrityCreationMode>(DEFAULT_CREATION_MODE)
+  const [basePhoto, setBasePhoto] = useState('')
+  // Taille utilisateur — parcours « Choisis ta star » uniquement.
+  const [userHeightCm, setUserHeightCm] = useState<number | undefined>()
+  const [hasUnlocked, setHasUnlocked] = useState(false)
   const [generatedImage, setGeneratedImage] = useState('')
   const [sessionId, setSessionId] = useState('')
   const [analysisId, setAnalysisId] = useState('')
@@ -147,6 +165,10 @@ export default function HomePage() {
     try {
       const data = await callFunction<AccountData>('account', opts)
       setCreditsBalance(data.creditsBalance)
+      // Préremplissage : le profil ne doit jamais écraser une saisie en cours.
+      if (isValidUserHeightCm(data.heightCm)) {
+        setUserHeightCm((current) => current ?? data.heightCm ?? undefined)
+      }
       if (data.sessionId) {
         setSessionId(data.sessionId)
         setStoredSessionId(data.sessionId)
@@ -168,6 +190,8 @@ export default function HomePage() {
     async function initSession() {
       const stored = getStoredSessionId()
       const storedEmail = getStoredEmail()
+      const storedHeight = getStoredUserHeightCm()
+      if (storedHeight !== null) setUserHeightCm(storedHeight)
       const { data: { user } } = await supabase.auth.getUser()
 
       if (user) {
@@ -278,7 +302,14 @@ export default function HomePage() {
     setStep('customCelebrity')
   }, [])
 
-  const handleCustomCelebritySubmit = useCallback((data: { name: string; domain: string; celebrityImageBase64: string }) => {
+  const handleCustomCelebritySubmit = useCallback((data: {
+    name: string
+    domain: string
+    celebrityImageBase64: string
+    userHeightCm: number
+  }) => {
+    setUserHeightCm(data.userHeightCm)
+    setStoredUserHeightCm(data.userHeightCm)
     setCelebrity({
       name: data.name,
       celebrity_domain: data.domain,
@@ -288,8 +319,31 @@ export default function HomePage() {
       fun_fact: '',
     })
     setCelebrityPhoto(data.celebrityImageBase64)
+    setStep('creationChoice')
+  }, [])
+
+  const handleCreationModeSubmit = useCallback((mode: CelebrityCreationMode) => {
+    setCreationMode(mode)
+    if (mode === 'photo_edit') {
+      setStep('basePhoto')
+      return
+    }
     void routeToUnlock()
   }, [routeToUnlock])
+
+  // Changer de photo après le paiement ne doit pas renvoyer sur le paywall.
+  const handleBasePhotoSubmit = useCallback((photo: string) => {
+    setBasePhoto(photo)
+    if (hasUnlocked) {
+      setStep('customize')
+      return
+    }
+    void routeToUnlock()
+  }, [hasUnlocked, routeToUnlock])
+
+  const handleChangeBasePhoto = useCallback(() => {
+    setStep('basePhoto')
+  }, [])
 
   const handleAnalyze = useCallback(() => setStep('analyzing'), [])
 
@@ -328,6 +382,7 @@ export default function HomePage() {
 
   const handlePaymentSuccess = useCallback((newBalance: number) => {
     setCreditsBalance(newBalance)
+    setHasUnlocked(true)
     setStep(appMode === 'match' ? 'result' : 'customize')
   }, [appMode])
 
@@ -372,12 +427,38 @@ export default function HomePage() {
     setGenerationId('')
     setGenerationRequest(null)
     setAppMode(null)
+    setCreationMode(DEFAULT_CREATION_MODE)
+    setBasePhoto('')
+    setHasUnlocked(false)
     setStep('modeChoice')
   }, [])
+
+  /** Régénérer : on garde star, mode, photo source et options de scène. */
+  const handleRegenerate = useCallback(() => {
+    setGeneratedImage('')
+    setStep('customize')
+  }, [])
+
+  /** Retour arrière sans perdre ce qui est déjà renseigné (étapes du choix de mode). */
+  const handleBack = useCallback(() => {
+    if (step === 'basePhoto') {
+      setStep('creationChoice')
+      return
+    }
+    if (step === 'creationChoice') {
+      setStep('customCelebrity')
+      return
+    }
+    handleReset()
+  }, [step, handleReset])
 
   // ── Back button visibility ─────────────────────────────────────────────────
   const noBack: Step[] = ['modeChoice', 'hero', 'analyzing', 'generating', 'signup', 'payment', 'result', 'customize', 'success']
   const showBackButton = !noBack.includes(step)
+
+  /** photo_edit : la photo de base remplace le selfie comme image principale. */
+  const generationImage =
+    appMode === 'custom' && creationMode === 'photo_edit' && basePhoto ? basePhoto : photoPreview
 
   return (
     <div className="relative min-h-screen bg-[#0A0A0A] flex flex-col">
@@ -406,7 +487,8 @@ export default function HomePage() {
               {showBackButton && (
                 <motion.button
                   initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }}
-                  onClick={handleReset}
+                  onClick={handleBack}
+                  aria-label="Revenir à l'étape précédente"
                   className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors flex-shrink-0"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
                   whileHover={{ borderColor: 'rgba(212,175,55,0.4)', scale: 1.05 }}
@@ -450,13 +532,15 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* ── Stepper ── */}
-      <div className="relative z-20 px-5 max-w-[390px] mx-auto w-full">
-        {(() => {
-          const stepper = getStepperState(step, userId, creditsBalance, appMode)
-          return <Stepper labels={stepper.labels} currentStep={stepper.index} />
-        })()}
-      </div>
+      {/* ── Stepper (masqué sur l'accueil : le parcours n'est pas encore choisi) ── */}
+      {step !== 'modeChoice' && (
+        <div className="relative z-20 px-5 max-w-[390px] mx-auto w-full">
+          {(() => {
+            const stepper = getStepperState(step, userId, creditsBalance, appMode)
+            return <Stepper labels={stepper.labels} currentStep={stepper.index} />
+          })()}
+        </div>
+      )}
 
       {/* ── Main ── */}
       <main className="relative z-10 flex-1 flex flex-col pb-10 pt-2 max-w-[390px] mx-auto w-full">
@@ -486,7 +570,37 @@ export default function HomePage() {
           {step === 'customCelebrity' && (
             <motion.div key="customCelebrity" className="px-5"
               variants={slideVariants} initial="enter" animate="center" exit="exit">
-              <CustomCelebrityForm preview={photoPreview} onSubmit={handleCustomCelebritySubmit} />
+              <CustomCelebrityForm
+                preview={photoPreview}
+                initialName={celebrity?.name}
+                initialDomain={celebrity?.celebrity_domain}
+                initialPhoto={celebrityPhoto}
+                initialHeightCm={userHeightCm}
+                onSubmit={handleCustomCelebritySubmit}
+              />
+            </motion.div>
+          )}
+
+          {step === 'creationChoice' && celebrity && (
+            <motion.div key="creationChoice" className="px-5"
+              variants={slideVariants} initial="enter" animate="center" exit="exit">
+              <CreationModeChoice
+                celebrityName={celebrity.name}
+                celebrityImageSrc={celebrityPhoto || undefined}
+                value={creationMode}
+                onSubmit={handleCreationModeSubmit}
+              />
+            </motion.div>
+          )}
+
+          {step === 'basePhoto' && celebrity && (
+            <motion.div key="basePhoto" className="px-5"
+              variants={slideVariants} initial="enter" animate="center" exit="exit">
+              <BasePhotoUpload
+                celebrityName={celebrity.name}
+                initialPhoto={basePhoto || photoPreview || undefined}
+                onSubmit={handleBasePhotoSubmit}
+              />
             </motion.div>
           )}
 
@@ -565,6 +679,10 @@ export default function HomePage() {
               <PhotoSceneCustomizer
                 celebrity={celebrity}
                 creditsBalance={creditsBalance}
+                creationMode={appMode === 'custom' ? creationMode : DEFAULT_CREATION_MODE}
+                basePhoto={basePhoto || undefined}
+                initialRequest={generationRequest ?? undefined}
+                onChangeBasePhoto={handleChangeBasePhoto}
                 onSubmit={handleSceneSubmit}
                 onNeedCredits={handleInsufficientCredits}
               />
@@ -575,11 +693,13 @@ export default function HomePage() {
             <motion.div key="generating" className="px-5"
               variants={slideVariants} initial="enter" animate="center" exit="exit">
               <GenerationLoader
-                preview={photoPreview}
-                imageBase64={photoPreview}
+                preview={generationImage}
+                imageBase64={generationImage}
                 celebrity={celebrity}
                 celebrityImageBase64={celebrityPhoto || undefined}
                 generationRequest={generationRequest}
+                creationMode={appMode === 'custom' ? creationMode : DEFAULT_CREATION_MODE}
+                userHeightCm={appMode === 'custom' ? userHeightCm : undefined}
                 sessionId={sessionId}
                 userId={userId}
                 email={userEmail}
@@ -595,12 +715,13 @@ export default function HomePage() {
             <motion.div key="success" className="px-5"
               variants={slideVariants} initial="enter" animate="center" exit="exit">
               <SuccessScreen
-                preview={photoPreview}
+                preview={generationImage}
                 generatedImage={generatedImage}
                 celebrity={celebrity}
                 celebrityImageSrc={celebrityPhoto || undefined}
                 creditsBalance={creditsBalance}
                 showMatchScore={appMode !== 'custom'}
+                onRegenerate={handleRegenerate}
                 onReset={handleReset}
               />
             </motion.div>

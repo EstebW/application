@@ -2,13 +2,28 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { MapPin, Shirt, Users, ChevronRight, Sparkles, Wand2, LayoutGrid } from 'lucide-react'
-import type { CelebrityResult, GenerationRequest, PhotoGenerationMode, PhotoScene } from '@/lib/types'
+import { MapPin, Shirt, Users, ChevronRight, Sparkles, Wand2, LayoutGrid, ImagePlus, RefreshCw } from 'lucide-react'
+import type {
+  CelebrityCreationMode,
+  CelebrityResult,
+  GenerationRequest,
+  PhotoGenerationMode,
+  PhotoScene,
+} from '@/lib/types'
+import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { CUSTOM_PROMPT_EXAMPLES, getDefaultScene, getSceneSuggestions } from '@/lib/scene-suggestions'
+import { INTERACTION_OPTIONS } from '@/lib/interactions'
 
 interface PhotoSceneCustomizerProps {
   celebrity: CelebrityResult
   creditsBalance?: number
+  /** Approche choisie dans le parcours « Choisis ta star » */
+  creationMode?: CelebrityCreationMode
+  /** Photo de base en mode photo_edit */
+  basePhoto?: string
+  /** Choix précédents — restaurés après un retour ou une régénération */
+  initialRequest?: GenerationRequest
+  onChangeBasePhoto?: () => void
   onSubmit: (request: GenerationRequest) => void
   onNeedCredits?: () => void
 }
@@ -77,27 +92,98 @@ function SceneField({
   )
 }
 
-export default function PhotoSceneCustomizer({ celebrity, creditsBalance, onSubmit, onNeedCredits }: PhotoSceneCustomizerProps) {
+const EDIT_NOTE_MAX = 300
+
+function InteractionPicker({
+  value,
+  onChange,
+  hint,
+}: {
+  value?: string
+  onChange: (id: string | undefined) => void
+  hint: string
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <Users size={14} className="text-[#D4AF37]" />
+        <label className="text-sm font-semibold text-white">
+          L&apos;interaction <span className="text-[#666] font-normal">(optionnel)</span>
+        </label>
+      </div>
+      <p className="text-[#666] text-xs leading-relaxed">{hint}</p>
+      <div className="flex flex-wrap gap-2">
+        {INTERACTION_OPTIONS.map(({ id, label }) => {
+          const active = value === id
+          return (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onChange(active ? undefined : id)}
+              className="px-3.5 py-2 rounded-full text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
+              style={{
+                background: active ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${active ? 'rgba(212,175,55,0.45)' : 'rgba(255,255,255,0.1)'}`,
+                color: active ? '#D4AF37' : '#9a9a9a',
+              }}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+export default function PhotoSceneCustomizer({
+  celebrity,
+  creditsBalance,
+  creationMode = DEFAULT_CREATION_MODE,
+  basePhoto,
+  initialRequest,
+  onChangeBasePhoto,
+  onSubmit,
+  onNeedCredits,
+}: PhotoSceneCustomizerProps) {
   const { name, celebrity_domain } = celebrity
   const suggestions = getSceneSuggestions(celebrity_domain)
-  const [mode, setMode] = useState<PhotoGenerationMode>('presets')
-  const [scene, setScene] = useState<PhotoScene>(() => getDefaultScene(celebrity_domain))
-  const [customPrompt, setCustomPrompt] = useState('')
+  const isPhotoEdit = creationMode === 'photo_edit'
+  const [mode, setMode] = useState<PhotoGenerationMode>(initialRequest?.mode ?? 'presets')
+  const [scene, setScene] = useState<PhotoScene>(
+    () => initialRequest?.photoScene ?? getDefaultScene(celebrity_domain)
+  )
+  const [customPrompt, setCustomPrompt] = useState(initialRequest?.customPrompt ?? '')
+  const [interaction, setInteraction] = useState<string | undefined>(initialRequest?.interaction)
+  const [editNote, setEditNote] = useState(isPhotoEdit ? initialRequest?.customPrompt ?? '' : '')
 
   const hasCredits = creditsBalance === undefined || creditsBalance > 0
   const canSubmitPresets = scene.location.trim() && scene.outfits.trim() && scene.position.trim()
   const canSubmitCustom = customPrompt.trim().length >= 20
-  const canSubmit = hasCredits && (mode === 'presets' ? canSubmitPresets : canSubmitCustom)
+  const canSubmit = isPhotoEdit
+    ? hasCredits && Boolean(basePhoto)
+    : hasCredits && (mode === 'presets' ? Boolean(canSubmitPresets) : canSubmitCustom)
 
   const handleSubmit = () => {
     if (!hasCredits) {
       onNeedCredits?.()
       return
     }
+    if (isPhotoEdit) {
+      // Pas de scène : la photo importée est la scène. La note reste facultative.
+      onSubmit({
+        mode: 'presets',
+        creationMode: 'photo_edit',
+        interaction,
+        customPrompt: editNote.trim() || undefined,
+      })
+      return
+    }
     if (mode === 'presets') {
-      onSubmit({ mode: 'presets', photoScene: scene })
+      onSubmit({ mode: 'presets', creationMode, photoScene: scene, interaction })
     } else {
-      onSubmit({ mode: 'custom', customPrompt: customPrompt.trim() })
+      onSubmit({ mode: 'custom', creationMode, customPrompt: customPrompt.trim(), interaction })
     }
   }
 
@@ -106,13 +192,13 @@ export default function PhotoSceneCustomizer({ celebrity, creditsBalance, onSubm
 
       <motion.div variants={up} className="text-center space-y-1.5">
         <p className="text-[#D4AF37] text-[11px] font-bold uppercase tracking-[0.15em]">
-          Mise en scène
+          {isPhotoEdit ? 'Intégration' : 'Mise en scène'}
         </p>
         <h2
           className="text-2xl font-black text-white leading-tight"
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
         >
-          Imagine ta photo avec{' '}
+          {isPhotoEdit ? 'Ajoute ' : 'Imagine ta photo avec '}
           <span style={{
             background: 'linear-gradient(135deg,#D4AF37,#F0D060)',
             WebkitBackgroundClip: 'text',
@@ -121,33 +207,38 @@ export default function PhotoSceneCustomizer({ celebrity, creditsBalance, onSubm
           }}>
             {name}
           </span>
+          {isPhotoEdit ? ' à ta photo' : ''}
         </h2>
         <p className="text-[#808080] text-sm">
-          Choisis des scènes guidées ou écris ton propre prompt
+          {isPhotoEdit
+            ? 'Ta photo et ton visage restent intacts — on ajoute seulement la star'
+            : 'Choisis des scènes guidées ou écris ton propre prompt'}
         </p>
       </motion.div>
 
-      <motion.div variants={up} className="grid grid-cols-2 gap-2">
-        {([
-          { id: 'presets' as const, label: 'Scènes guidées', icon: LayoutGrid },
-          { id: 'custom' as const, label: 'Prompt libre', icon: Wand2 },
-        ]).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setMode(id)}
-            className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-colors"
-            style={{
-              background: mode === id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
-              border: `1px solid ${mode === id ? 'rgba(212,175,55,0.45)' : 'rgba(255,255,255,0.08)'}`,
-              color: mode === id ? '#D4AF37' : '#888',
-            }}
-          >
-            <Icon size={15} />
-            {label}
-          </button>
-        ))}
-      </motion.div>
+      {!isPhotoEdit && (
+        <motion.div variants={up} className="grid grid-cols-2 gap-2">
+          {([
+            { id: 'presets' as const, label: 'Scènes guidées', icon: LayoutGrid },
+            { id: 'custom' as const, label: 'Prompt libre', icon: Wand2 },
+          ]).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMode(id)}
+              className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
+              style={{
+                background: mode === id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${mode === id ? 'rgba(212,175,55,0.45)' : 'rgba(255,255,255,0.08)'}`,
+                color: mode === id ? '#D4AF37' : '#888',
+              }}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </motion.div>
+      )}
 
       <motion.div
         variants={up}
@@ -157,7 +248,73 @@ export default function PhotoSceneCustomizer({ celebrity, creditsBalance, onSubm
           border: '1px solid rgba(212,175,55,0.2)',
         }}
       >
-        {mode === 'presets' ? (
+        {isPhotoEdit ? (
+          <div className="space-y-6">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2">
+                <ImagePlus size={14} className="text-[#D4AF37]" />
+                <label className="text-sm font-semibold text-white">Ta photo de départ</label>
+              </div>
+              {basePhoto ? (
+                <div
+                  className="w-full rounded-xl overflow-hidden"
+                  style={{ border: '1px solid rgba(212,175,55,0.3)' }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={basePhoto}
+                    alt="Ta photo de départ"
+                    className="w-full max-h-[240px] object-contain bg-black"
+                  />
+                </div>
+              ) : (
+                <p className="text-[#808080] text-xs">Aucune photo de départ sélectionnée.</p>
+              )}
+              {onChangeBasePhoto && (
+                <button
+                  type="button"
+                  onClick={onChangeBasePhoto}
+                  className="flex items-center gap-2 text-[#D4AF37] text-xs font-semibold py-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded"
+                >
+                  <RefreshCw size={12} />
+                  Changer de photo
+                </button>
+              )}
+            </div>
+
+            <InteractionPicker
+              value={interaction}
+              onChange={setInteraction}
+              hint={`Comment ${name} se place à côté de toi. Ignoré si ça obligerait à modifier ta photo.`}
+            />
+
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2">
+                <Wand2 size={14} className="text-[#D4AF37]" />
+                <label className="text-sm font-semibold text-white">
+                  Une précision ? <span className="text-[#666] font-normal">(optionnel)</span>
+                </label>
+              </div>
+              <p className="text-[#666] text-xs leading-relaxed">
+                Ex : « place-la à ma droite ». Ta photo, ton visage et le décor restent inchangés
+                quoi qu&apos;il arrive.
+              </p>
+              <textarea
+                value={editNote}
+                onChange={(e) => setEditNote(e.target.value.slice(0, EDIT_NOTE_MAX))}
+                rows={2}
+                placeholder={`Ex : ${name} debout à ma droite, un peu en retrait`}
+                className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder:text-[#555] resize-none outline-none transition-colors"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+                onFocus={(e) => { e.target.style.borderColor = 'rgba(212,175,55,0.4)' }}
+                onBlur={(e) => { e.target.style.borderColor = 'rgba(255,255,255,0.1)' }}
+              />
+              <p className="text-[#555] text-[10px]">
+                {editNote.length} / {EDIT_NOTE_MAX}
+              </p>
+            </div>
+          </div>
+        ) : mode === 'presets' ? (
           <>
             <SceneField
               icon={MapPin}
@@ -231,6 +388,14 @@ export default function PhotoSceneCustomizer({ celebrity, creditsBalance, onSubm
             </div>
           </div>
         )}
+
+        {!isPhotoEdit && (
+          <InteractionPicker
+            value={interaction}
+            onChange={setInteraction}
+            hint={`Comment êtes-vous l'un par rapport à l'autre avec ${name} ?`}
+          />
+        )}
       </motion.div>
 
       <motion.div variants={up} className="w-full space-y-3">
@@ -265,7 +430,7 @@ export default function PhotoSceneCustomizer({ celebrity, creditsBalance, onSubm
           <motion.button
             disabled={!canSubmit}
             onClick={handleSubmit}
-            className="w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-opacity"
+            className="w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A0A0A]"
             style={{
               background: canSubmit
                 ? 'linear-gradient(135deg,#D4AF37,#F0D060)'
@@ -277,9 +442,15 @@ export default function PhotoSceneCustomizer({ celebrity, creditsBalance, onSubm
             whileTap={canSubmit ? { scale: 0.98 } : {}}
           >
             <Sparkles size={16} />
-            Générer ma photo
+            {isPhotoEdit ? `Ajouter ${name} à ma photo` : 'Générer ma photo'}
             <ChevronRight size={16} />
           </motion.button>
+        )}
+
+        {isPhotoEdit && !basePhoto && (
+          <p className="text-center text-[#555] text-xs">
+            Sélectionne d&apos;abord une photo de départ.
+          </p>
         )}
       </motion.div>
     </motion.div>

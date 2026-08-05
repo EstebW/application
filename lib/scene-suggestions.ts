@@ -1,4 +1,8 @@
+import { getInteractionPrompt } from './interactions'
+import { heightConsistencyBlock } from './height-prompt'
 import type { PhotoGenerationContext, PhotoScene } from './types'
+
+export { heightConsistencyBlock }
 
 interface SceneSuggestions {
   locations: string[]
@@ -186,56 +190,60 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
 }
 
 /** Anti-"AI look" : photo smartphone amateur, indiscernable d'une vraie photo. */
-function photorealismBlock(): string[] {
+function photorealismBlock(celebrityName: string): string[] {
+  const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
   return [
     'PHOTOREALISM — AUTHENTIC AMATEUR SMARTPHONE PHOTO (highest visual priority after face locks):',
-    'Generate a photo that is completely indistinguishable from a genuine amateur smartphone picture taken in real life.',
-    'The image must NEVER look AI-generated, CGI, rendered, edited, or professionally photographed.',
+    `Create a highly believable real-life amateur smartphone photo featuring the user together with ${celeb} in the scene described in the USER SCENE BRIEF below.`,
     '',
-    'STYLE:',
-    '- Authentic smartphone photography; natural candid moment.',
-    '- Slightly imperfect framing; slight handheld camera shake; tiny motion blur when appropriate.',
-    '- Natural facial expressions (not exaggerated, not perfect).',
-    '- Realistic human skin with pores, texture, small blemishes and imperfections — NO beauty filter.',
-    '- Natural eye reflections; slight phone-lens distortion; automatic smartphone HDR (mild, not overcooked).',
-    '- Mild digital noise and compression artifacts; realistic white balance; slightly inconsistent exposure.',
-    '- Natural clothing wrinkles; random real background details.',
-    '- Real-life lighting ONLY — environment light must affect subjects naturally, with genuine shadows and reflections.',
-    '- Imperfect focus consistency.',
+    'ABSOLUTE PRIORITY — PRESERVE THE USER\'S IDENTITY EXACTLY:',
+    'Do not redesign, beautify, improve, or reinterpret the user\'s face. Keep the exact facial structure, jawline, nose shape, eye shape, mouth shape, hairstyle, skin tone, glasses if present, and overall likeness. The user must still look exactly like the same real person from the source image, not like an AI-modified version.',
     '',
-    'COMPOSITION:',
-    '- Spontaneous: as if someone quickly pulled out their phone and captured a real moment without preparation.',
-    '- Must NOT feel posed or professionally composed.',
+    'The image must look like a genuine casual phone photo taken in real life, not like AI art, CGI, a 3D render, or a professional photoshoot. It should feel spontaneous, natural, candid, and slightly imperfect, as if captured quickly in a real moment by a friend or as a casual selfie.',
     '',
-    'PEOPLE:',
-    '- Body proportions, hands, teeth, hair and facial features completely natural.',
-    '- Subtle human asymmetry; avoid exaggerated smiles or perfect poses.',
-    '- Hands/fingers/ears/eyes anatomically correct — no extra fingers, warped ears, or glassy doll eyes.',
+    'AUTHENTIC AMATEUR SMARTPHONE PHOTOGRAPHY STYLE:',
+    '- natural real-world lighting only',
+    '- slightly imperfect framing',
+    '- subtle handheld feel',
+    '- mild realistic motion blur when appropriate',
+    '- slight lens distortion from a phone camera',
+    '- natural skin texture with pores and small imperfections',
+    '- realistic eyes, teeth, hands, and hair',
+    '- realistic clothing wrinkles and folds',
+    '- mild phone-camera noise',
+    '- slight compression artifacts',
+    '- realistic shadows and reflections',
+    '- believable depth and perspective',
+    '- authentic background details',
+    '- natural asymmetry in faces and posture',
+    '- expressions must feel relaxed and genuine, not staged',
     '',
-    'CAMERA:',
-    '- Looks taken on an iPhone or recent Android smartphone, default Camera app, automatic mode.',
+    `${celeb} must look naturally present in the same environment as the user, with realistic posture, believable body language, and lighting perfectly matching the surroundings. The interaction between the user and ${celeb} should feel like a real encounter captured in the moment, not like a promotional image or posed advertisement.`,
     '',
-    'NEGATIVE / FORBIDDEN LOOK:',
-    '- No CGI, no AI look, no studio lighting, no cinematic lighting, no beauty filter, no glamour photography.',
-    '- No influencer aesthetic, no ultra-sharp details, no fake bokeh, no perfect symmetry, no wax/plastic skin.',
-    '- No overprocessed HDR, no unrealistic colors, no commercial / fashion / magazine photography.',
-    '- No unnatural facial expressions.',
+    'The composition must not feel too perfect or too polished. Avoid a centered commercial look. Let the image feel like a normal everyday snapshot from a phone gallery, Snapchat, BeReal, or Instagram Story. The final image should include subtle imperfections that make it feel real: slightly uneven framing, tiny exposure inconsistencies, natural ambient clutter, and realistic environment details.',
+    '',
+    'IMPORTANT NEGATIVE REQUIREMENTS:',
+    'Do not make the skin too smooth, do not beautify the face, do not over-sharpen, do not make the image cinematic, do not use studio lighting, do not create a beauty-filter effect, do not make smiles too perfect, do not create fake bokeh, do not overprocess HDR, do not distort objects, do not generate incoherent backgrounds, do not create unrealistic car interiors or strange object shapes, do not make the subjects look like influencers or models, and do not make the result look AI-generated in any way.',
+    '',
+    'AVOID: AI-generated look, CGI, 3D render, waxy skin, doll face, glossy skin, fake symmetry, perfect composition, professional advertising style, fashion-shoot vibes, magazine photography, unrealistic colors, over-detailed textures, unnatural hands, distorted perspective, and artificial background people.',
     '',
     'VARIATION:',
     '- Randomize camera angle, focal length, distance, lighting, expressions, posture, head orientation, framing, background activity, object placement, and slight imperfections so each generation feels like a different real-life moment.',
-    '- Final result should be impossible to distinguish from a genuine Snapchat / BeReal / Instagram Stories / smartphone gallery photo.',
     '',
     'SCENE FIDELITY — FOLLOW THE USER BRIEF LITERALLY:',
     '- Execute the requested location, outfits, and pose EXACTLY as described. Do not substitute a generic VIP / red-carpet / yacht / gala stock scene.',
     '- If the brief is quirky, funny, or specific, KEEP that specificity — originality is the point.',
     '- Do not "upgrade" the scene into a cliché celebrity photoshoot unless the user asked for that.',
+    '',
+    `OUTPUT GOAL: a photo that is almost impossible to distinguish from a genuine real amateur smartphone picture taken in a real-life moment with ${celeb} in the requested scene.`,
   ]
 }
 
 /**
- * Prompt Nano Banana 2 — scènes guidées ou prompt libre utilisateur.
+ * Prompt « Créer une nouvelle photo » — scènes guidées ou prompt libre utilisateur.
+ * Le modèle recompose la scène en gardant l'identité de l'utilisateur.
  */
-export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
+export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   const {
     celebrityName,
     celebrityDomain,
@@ -244,6 +252,7 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     mode,
     scene,
     customPrompt,
+    interaction,
     hasCelebrityReferenceImage,
   } = ctx
 
@@ -295,6 +304,15 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     ? 'IDENTITY-PRESERVING COMPOSITE: keep BOTH reference faces exactly intact while placing Person A and Person B together in a NEW scene that faithfully matches the user brief — output must look like a genuine amateur smartphone photo.'
     : 'IDENTITY-PRESERVING EDIT: keep Person A\'s face exactly intact from the reference while placing them in a scene with a celebrity — output must look like a genuine amateur smartphone photo that faithfully matches the user brief.'
 
+  const interactionPrompt = getInteractionPrompt(interaction)
+  const interactionLine = interactionPrompt
+    ? `4. INTERACTION between the two people: ${sanitizeSceneText(interactionPrompt)}.`
+    : ''
+
+  // Les lignes vides sont filtrées en fin de fonction : le bloc est pré-joint
+  // pour conserver ses paragraphes.
+  const heightSection = heightConsistencyBlock(ctx).join('\n')
+
   if (mode === 'custom' && customPrompt) {
     const userPrompt = sanitizeSceneText(customPrompt)
     return [
@@ -302,10 +320,13 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
       '',
       ...facePreservationBlock(dual),
       '',
-      ...photorealismBlock(),
+      ...photorealismBlock(celebrityName),
+      '',
+      heightSection,
       '',
       'USER SCENE PROMPT (apply to setting/outfits/pose ONLY — faces stay locked; follow literally):',
       userPrompt,
+      interactionLine,
       '',
       'SUBJECTS:',
       ...subjectLines,
@@ -329,12 +350,15 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...facePreservationBlock(dual),
     '',
-    ...photorealismBlock(),
+    ...photorealismBlock(celebrityName),
+    '',
+    heightSection,
     '',
     'USER SCENE BRIEF (setting/outfits/pose ONLY — faces stay locked; follow literally):',
     `1. LOCATION / SETTING: ${location}`,
     `2. OUTFITS for both people: ${outfits}`,
     `3. POSE and FRAMING: ${position}`,
+    interactionLine,
     '',
     'SUBJECTS:',
     ...subjectLines,
@@ -343,6 +367,138 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...finalReminder,
   ].filter(Boolean).join('\n')
+}
+
+/**
+ * Prompt « Ajouter la star à ma photo » — la photo importée est la base immuable.
+ * On n'invente ni décor ni visage : on insère seulement la star dans l'espace libre.
+ */
+export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
+  const { celebrityName, celebrityDomain, interaction, customPrompt, hasCelebrityReferenceImage } = ctx
+  const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
+  const domain = sanitizeSceneText(celebrityDomain)
+  const dual = Boolean(hasCelebrityReferenceImage)
+  const interactionPrompt = getInteractionPrompt(interaction)
+  // Précision facultative de l'utilisateur : jamais prioritaire sur la préservation.
+  const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 300) : ''
+
+  return [
+    'INVISIBLE INTEGRATION OF A CELEBRITY INTO AN EXISTING PHOTOGRAPH.',
+    '',
+    'Edit the uploaded photograph instead of generating an entirely new image.',
+    '',
+    'Treat the uploaded photograph as the immutable visual base of the final result.',
+    '',
+    `The goal is to add ${celeb}${domain ? ` (${domain})` : ''} naturally into the existing photograph, so that it looks as if they had really been present at the moment the original photo was taken.`,
+    '',
+    'image_input ORDER:',
+    '- image_input[0] = THE BASE PHOTOGRAPH (immutable). It defines EVERYTHING: camera, framing, perspective, eye level, lighting and image quality. It contains the user.',
+    ...(dual
+      ? [
+          `- image_input[1] = FACIAL IDENTITY REFERENCE ONLY for ${celeb}.`,
+          '- CRITICAL: image_input[1] is NOT a cutout to paste. Never copy its framing, crop, head size, head angle, body pose, clothing scale, background, lighting or image quality. Take the facial identity from it and NOTHING else.',
+          `- If image_input[1] shows only a head or upper body, generate the rest of ${celeb}'s body naturally, consistent with their real build and with the framing of image_input[0].`,
+          `- ${celeb}'s facial identity must match image_input[1] exactly — same features, same hair. Do not invent a generic celebrity face and do not blend their face with the user's.`,
+        ]
+      : []),
+    '',
+    'DO NOT ASSUME THIS IS A GROUP PHOTO.',
+    '',
+    'Do not change the type of photo, the setting, the composition, the mood or the intent of the original photograph.',
+    '',
+    `Adapt ${celeb} to the existing image, whether it is a selfie, a portrait, a full-body shot, an indoor photo, an outdoor photo, an amateur snapshot, a party, a car interior, a street, a beach, a restaurant, a concert or any other real-life situation.`,
+    '',
+    'PRESERVE THE ORIGINAL PHOTOGRAPH AND THE PERSON ALREADY IN IT AS MUCH AS POSSIBLE.',
+    '',
+    'Do not regenerate, replace, beautify, redraw, smooth, sharpen or reinterpret the user.',
+    '',
+    'Preserve exactly: their identity; their face; their facial proportions; their expression; their skin texture; their hairstyle; their body; their posture; their hands; their clothing; their accessories.',
+    '',
+    'Preserve the original photographic characteristics as well: the background; the objects; the framing; the crop; the camera angle; the perspective; the horizon line; the apparent focal length; the resolution; the lighting; the shadows; the reflections; the colours; the sharpness; the blur; the depth of field; the grain; the digital noise; the compression artefacts; the visual signature of the camera or smartphone that took the photo.',
+    '',
+    `Only add ${celeb} into a physically believable available area of the photograph.`,
+    '',
+    `${celeb}'s position, posture, body orientation, expression, interaction and visibility must adapt naturally to the existing scene.`,
+    '',
+    'Do not impose a posture or an interaction that is incompatible with the original photograph.',
+    '',
+    `${celeb} must match the source photo precisely in terms of: perspective; camera height; body scale; distance from the camera; light direction; light intensity; shadow softness; exposure; white balance; colour temperature; colour cast; contrast; saturation; dynamic range; sharpness; focus softness; motion blur; depth of field; skin detail level; sensor noise; grain; compression; lens distortion; overall image quality.`,
+    '',
+    `${celeb} must NEVER appear sharper, cleaner, brighter, more detailed, more saturated, more contrasted or more professionally photographed than the user or the original environment.`,
+    '',
+    'If the source photograph is dark, soft, slightly blurry, grainy, noisy, compressed, desaturated, imperfectly exposed or of average quality, reproduce those exact same imperfections on the added celebrity.',
+    '',
+    `${celeb} must feel physically present in the environment. Use realistically: ground placement; perspective; body scale; contact shadows; cast shadows; light bounced from the environment; contour softness; overlaps; natural occlusions; spacing between people and objects; interaction with nearby objects; interaction with the user when appropriate.`,
+    '',
+    `${celeb} must not look pasted, floating, cut out, superimposed or photographed with a different camera.`,
+    '',
+    'GEOMETRY AND SCALE — THIS IS THE #1 FAILURE POINT, TREAT IT AS CRITICAL:',
+    `- Render ${celeb} as a COMPLETE, coherent human being physically present in the scene. Never a floating head, never a head-and-shoulders cutout, never a sticker pasted on top of the photo.`,
+    '- Their head-to-body proportions must be anatomically correct. A head without a matching body, or a head too large for its body, is an automatic failure.',
+    '- Size their head like a real human head at their actual distance from the camera: compare it to the user\'s head and scale it by depth — slightly smaller when further away, never bigger unless they are clearly closer to the lens.',
+    '- Use the SAME eye level, horizon line, camera height, lens focal length and perspective vanishing lines as image_input[0]. Their gaze and head tilt must be consistent with that camera position.',
+    '- Ground them physically: plausible standing or seated position, weight supported by the floor, feet visible or naturally occluded by the user, furniture or the frame border.',
+    '- If image_input[0] is a close-range selfie, place them at arm\'s length beside or slightly behind the user, sharing the same wide-angle distortion, partially occluded by the user or the frame — exactly as it would happen in real life.',
+    '- If the frame cuts them off, it must read as natural photographic framing: a continuous body cut by the image border, never a detached silhouette floating inside the frame.',
+    '- Blend their edges into the photograph: no hard cutout outline, no halo, no fringe. Their contours must carry the same softness, motion blur, grain and JPEG compression as the surrounding pixels.',
+    `- Do not reuse or re-attribute the user's limbs. Any arm or hand belonging to ${celeb} must be anatomically connected to their own body. Never add a limb without a body.`,
+    '- Never duplicate people, faces, hands or limbs.',
+    '',
+    heightConsistencyBlock(ctx).join('\n'),
+    '',
+    'DO NOT reconstruct the whole scene.',
+    'DO NOT globally enhance or upgrade the photograph.',
+    'DO NOT add cinematic lighting.',
+    'DO NOT add studio lighting.',
+    'DO NOT create fake HDR.',
+    'DO NOT create fake background blur.',
+    'DO NOT create shiny, plastic or artificial skin.',
+    'DO NOT turn the image into a promotional, advertising, editorial, cinematic or poster photograph.',
+    'DO NOT crop or reframe the image unless absolutely necessary.',
+    '',
+    `Make only the changes strictly necessary to integrate ${celeb} naturally into the original photograph.`,
+    '',
+    'AVOID: pasted cutout look, sticker effect, collage, photomontage, floating head or torso, disembodied head, oversized or undersized head, wrong head-to-body ratio, mismatched perspective, mismatched eye level, subject sharper than the photo, hard edges, halo outline, distorted anatomy, incoherent shadows, duplicated objects, altered faces, artificial skin and any obvious AI-generated appearance.',
+    '',
+    ...(interactionPrompt
+      ? [
+          'OPTIONAL INTERACTION (only if it fits the existing photo without moving or reshaping the user):',
+          `- Preferred: ${sanitizeSceneText(interactionPrompt)}.`,
+          '- If this interaction would require changing the user\'s pose, body, framing or background, IGNORE it and simply place the celebrity in the free space.',
+          '',
+        ]
+      : []),
+    ...(userHint
+      ? [
+          'OPTIONAL USER NOTE (lowest priority — never overrides the rules above):',
+          userHint,
+          '- Ignore any part of this note that would modify the user, the background or the framing.',
+          '',
+        ]
+      : []),
+    'FINAL GOAL:',
+    'The edited result must look like ONE single real photograph taken at the same moment with the same camera.',
+    'Someone looking at the image must not be able to tell which person was added after the shot.',
+    '',
+    'FINAL MANDATORY CHECK:',
+    '1) Is the user pixel-identical to image_input[0] (face, pose, clothes, expression)? If not, redo without touching them.',
+    '2) Is the background the ORIGINAL background, not a recreated one? If not, redo.',
+    `3) Is ${celeb} a COMPLETE person with a correctly proportioned body, head size, eye level and perspective consistent with the user? If not, fix the geometry before anything else.`,
+    `4) Is ${celeb} exactly as soft, grainy, noisy and imperfect as the rest of the photograph — never cleaner or sharper? If not, degrade them to match.`,
+    '5) Does any part look pasted — hard edges, halo, floating body, sticker, mismatched sharpness? If yes, re-integrate with matching grain, blur, shadows and depth of field.',
+    '6) Could a stranger tell which person was added? If yes, the edit has failed.',
+    '7) Preserving the original photo always wins over a nicer composition.',
+  ].filter((line) => line !== '').join('\n')
+}
+
+/**
+ * Dispatcher : choisit le prompt selon l'approche de création.
+ * Sans creationMode (historique / parcours « jumeau célèbre »), on reste en full_generation.
+ */
+export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
+  return ctx.creationMode === 'photo_edit'
+    ? buildPhotoEditPrompt(ctx)
+    : buildFullGenerationPrompt(ctx)
 }
 
 export const CUSTOM_PROMPT_EXAMPLES = [
