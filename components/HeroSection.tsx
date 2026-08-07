@@ -34,7 +34,7 @@ const STEPS = [
     num: '02',
     icon: Sparkles,
     title: "L'IA analyse ton visage",
-    desc: 'Notre IA scanne 68 points de ton visage et compare avec +10 000 célébrités mondiales.',
+    desc: 'Notre IA analyse la structure de ton visage et cherche la meilleure ressemblance célèbre.',
   },
   {
     num: '03',
@@ -406,7 +406,7 @@ export default function HeroSection({ onPhotoSelected }: HeroSectionProps) {
           <p className="text-white text-sm font-bold text-center">Ce que tu obtiens, gratuitement</p>
           <div className="space-y-2.5">
             {[
-              "Analyse faciale avec +10 000 célébrités",
+              "Analyse faciale approfondie",
               "Score de ressemblance précis en %",
               "Ton portrait avec ta célébrité jumelle",
               "Résultat en moins de 10 secondes",

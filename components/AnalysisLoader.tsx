@@ -7,9 +7,9 @@ import type { CelebrityResult } from '@/lib/types'
 import { callFunction } from '@/lib/functions'
 
 const STEPS = [
-  'Détection des points clés de ton visage...',
-  'Comparaison avec 10 000 célébrités...',
-  'Calcul de la ressemblance exacte...',
+  'Analyse morphologique de ton visage...',
+  'Comparaison structurelle des traits...',
+  'Classement des meilleures ressemblances...',
   'Ton jumeau vient d\'être trouvé !',
 ]
 
@@ -47,8 +47,8 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
       setStepIndex((prev) => Math.min(prev + 1, STEPS.length - 2))
     }, 1100)
 
-    // Minimum display time before transitioning
-    const MIN_MS = 3800
+    // Minimum display time before transitioning (2 appels Gemini → analyse plus longue)
+    const MIN_MS = 5200
 
     const t0 = Date.now()
 

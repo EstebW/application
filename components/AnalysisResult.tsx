@@ -6,6 +6,7 @@ import { Check, RefreshCw, Sparkles } from 'lucide-react'
 import GoldParticles from './GoldParticles'
 import CelebrityPortrait from './CelebrityPortrait'
 import type { CelebrityResult } from '@/lib/types'
+import { topFeatureHighlights } from '@/lib/twin-score'
 
 interface AnalysisResultProps {
   preview: string
@@ -18,7 +19,9 @@ interface AnalysisResultProps {
 
 export default function AnalysisResult({ preview, celebrity, celebrityImageSrc, onGenerate, onReset }: AnalysisResultProps) {
   const [showParticles, setShowParticles] = useState(true)
-  const { name, celebrity_domain, score, traits, fun_fact } = celebrity
+  const { name, celebrity_domain, score, traits, fun_fact, featureScores, runnersUp } = celebrity
+
+  const highlights = featureScores ? topFeatureHighlights(featureScores, 4) : []
 
   useEffect(() => {
     const timer = setTimeout(() => setShowParticles(false), 3500)
@@ -42,7 +45,6 @@ export default function AnalysisResult({ preview, celebrity, celebrityImageSrc, 
       animate="visible"
       className="flex flex-col items-center gap-6 w-full"
     >
-      {/* Title */}
       <motion.div variants={itemVariants} className="text-center space-y-1">
         <p className="text-[#A0A0A0] text-xs uppercase tracking-widest font-semibold">
           Résultat de ton analyse
@@ -51,11 +53,10 @@ export default function AnalysisResult({ preview, celebrity, celebrityImageSrc, 
           className="text-4xl font-black text-white"
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
         >
-          Ton jumeau révélé
+          Ton jumeau célèbre
         </h2>
       </motion.div>
 
-      {/* Main result card */}
       <motion.div variants={itemVariants} className="w-full relative">
         <GoldParticles active={showParticles} />
 
@@ -73,7 +74,6 @@ export default function AnalysisResult({ preview, celebrity, celebrityImageSrc, 
           />
 
           <div className="p-6 space-y-6">
-            {/* Photo + celeb comparison */}
             <div className="flex items-center justify-center gap-4">
               <div className="flex flex-col items-center gap-2">
                 <div
@@ -104,7 +104,6 @@ export default function AnalysisResult({ preview, celebrity, celebrityImageSrc, 
               />
             </div>
 
-            {/* Celebrity name + score */}
             <div className="text-center space-y-3">
               <p className="text-[#A0A0A0] text-sm">Tu ressembles à</p>
               <motion.h3
@@ -130,54 +129,107 @@ export default function AnalysisResult({ preview, celebrity, celebrityImageSrc, 
               )}
 
               <motion.div
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-full"
+                className="inline-flex flex-col items-center gap-0.5 px-6 py-2.5 rounded-2xl"
                 style={{ background: 'linear-gradient(135deg, #D4AF37, #F0D060)' }}
                 animate={{ boxShadow: ['0 0 0 0 rgba(212,175,55,0.5)', '0 0 0 8px rgba(212,175,55,0)', '0 0 0 0 rgba(212,175,55,0.5)'] }}
                 transition={{ duration: 2, repeat: Infinity }}
               >
-                <span className="text-black font-black text-xl">{score}%</span>
-                <span className="text-black/70 font-semibold text-sm">de ressemblance</span>
+                <span className="text-black/60 text-[10px] font-bold uppercase tracking-wider">
+                  Score de ressemblance StarFusion
+                </span>
+                <span className="text-black font-black text-2xl leading-none">{score} / 100</span>
               </motion.div>
-
-              {score >= 85 && (
-                <p className="text-[#D4AF37]/80 text-xs font-medium pt-1">
-                  Ressemblance rarissime — moins de 3% des visages analysés dépassent 85%
-                </p>
-              )}
             </div>
 
             <div className="h-px bg-gradient-to-r from-transparent via-[#D4AF37]/30 to-transparent" />
 
-            <div className="space-y-2.5">
-              <p className="text-[#A0A0A0] text-xs uppercase tracking-widest">Traits communs détectés</p>
-              {traits.map((trait, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.3 + i * 0.1 }}
-                  className="flex items-center gap-3"
-                >
-                  <div className="w-5 h-5 rounded-full bg-[#D4AF37]/15 border border-[#D4AF37]/40 flex items-center justify-center flex-shrink-0">
-                    <Check size={10} className="text-[#D4AF37]" />
-                  </div>
-                  <span className="text-white text-sm font-medium">{trait}</span>
-                </motion.div>
-              ))}
-            </div>
+            {(fun_fact || traits.length > 0) && (
+              <div className="space-y-2">
+                <p className="text-[#A0A0A0] text-xs uppercase tracking-widest">Pourquoi vous vous ressemblez</p>
+                <p className="text-white/90 text-sm leading-relaxed">
+                  {fun_fact || traits.join('. ')}
+                </p>
+              </div>
+            )}
 
-            {fun_fact && (
-              <p className="text-[#A0A0A0] text-sm text-center leading-relaxed italic">
-                &ldquo;{fun_fact}&rdquo;
-              </p>
+            {highlights.length > 0 && (
+              <div className="space-y-2.5">
+                <p className="text-[#A0A0A0] text-xs uppercase tracking-widest">Vos points communs les plus forts</p>
+                {highlights.map((h, i) => (
+                  <motion.div
+                    key={h.key}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.25 + i * 0.08 }}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-5 h-5 rounded-full bg-[#D4AF37]/15 border border-[#D4AF37]/40 flex items-center justify-center flex-shrink-0">
+                        <Check size={10} className="text-[#D4AF37]" />
+                      </div>
+                      <span className="text-white text-sm font-medium truncate">{h.label}</span>
+                    </div>
+                    <span className="text-[#D4AF37] text-sm font-black tabular-nums flex-shrink-0">{h.score}</span>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+
+            {!highlights.length && traits.length > 0 && (
+              <div className="space-y-2.5">
+                <p className="text-[#A0A0A0] text-xs uppercase tracking-widest">Traits communs détectés</p>
+                {traits.map((trait, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.3 + i * 0.1 }}
+                    className="flex items-center gap-3"
+                  >
+                    <div className="w-5 h-5 rounded-full bg-[#D4AF37]/15 border border-[#D4AF37]/40 flex items-center justify-center flex-shrink-0">
+                      <Check size={10} className="text-[#D4AF37]" />
+                    </div>
+                    <span className="text-white text-sm font-medium">{trait}</span>
+                  </motion.div>
+                ))}
+              </div>
             )}
           </div>
         </div>
       </motion.div>
 
-      {/* CTA block */}
+      {runnersUp && runnersUp.length > 0 && (
+        <motion.div variants={itemVariants} className="w-full space-y-3">
+          <p className="text-[#A0A0A0] text-xs uppercase tracking-widest text-center">
+            Tes autres ressemblances
+          </p>
+          <div className="space-y-2">
+            {runnersUp.map((runner, i) => (
+              <div
+                key={`${runner.name}-${i}`}
+                className="flex items-center gap-3 rounded-2xl px-4 py-3"
+                style={{
+                  background: 'linear-gradient(160deg,#141414,#0E0E0E)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                }}
+              >
+                <span className="text-[#D4AF37]/50 text-xs font-black w-6">#{i + 2}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-bold truncate">{runner.name}</p>
+                  {runner.celebrity_domain && (
+                    <p className="text-[#606060] text-[10px] uppercase tracking-wider">{runner.celebrity_domain}</p>
+                  )}
+                </div>
+                <span className="text-[#D4AF37] text-sm font-black tabular-nums flex-shrink-0">
+                  {runner.score} / 100
+                </span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
       <motion.div variants={itemVariants} className="w-full space-y-3">
-        {/* Teaser label */}
         <div className="text-center">
           <p className="text-[#A0A0A0] text-sm">
             Et si tu te retrouvais sur une photo

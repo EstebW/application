@@ -1,20 +1,38 @@
 import type { CelebrityHeightConfidence } from './height'
+import type { FeatureScores } from './twin-score'
 
-export type { CelebrityHeightConfidence }
+export type { CelebrityHeightConfidence, FeatureScores }
+
+/** Finaliste du Top 3 — scores globaux toujours calculés côté backend */
+export interface TwinRunnerUp {
+  name: string
+  celebrity_domain: string
+  score: number
+  featureScores?: FeatureScores
+  strongestSimilarities?: string[]
+  mainDifferences?: string[]
+}
 
 export interface CelebrityResult {
   /** Nom complet de la célébrité (ex: "Ryan Gosling") */
   name: string
   /** Domaine de la célébrité (ex: "Acteur", "Chanteur", "Sportif") */
   celebrity_domain: string
-  /** Score de ressemblance 65–95 */
+  /**
+   * Score de ressemblance StarFusion 0–100.
+   * Calculé côté backend à partir des sous-scores — jamais inventé par le LLM.
+   */
   score: number
-  /** 3 traits faciaux communs */
+  /** Points de ressemblance (souvent dérivés de strongestSimilarities) */
   traits: string[]
   /** Description du style visuel de la célébrité — utilisée pour la génération d'image */
   celebrity_style_description: string
-  /** Anecdote fun comparant les deux personnes */
+  /** Explication personnalisée de la ressemblance */
   fun_fact: string
+  /** Sous-scores morphologiques du gagnant (match uniquement) */
+  featureScores?: FeatureScores
+  /** #2 et #3 — révélés après déblocage du paywall */
+  runnersUp?: TwinRunnerUp[]
 }
 
 export interface PhotoScene {

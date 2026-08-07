@@ -663,26 +663,31 @@ async function resolveBillingSession(
 }
 
 /** Critère #1 : identité faciale INTÉGRALE.
- *  Avec 2 images, Person A et Person B sont verrouillés à égalité. */
+ *  Avec 2 images, Person A et Person B sont verrouillés à égalité.
+ *  Parcours « jumeau » (1 image) : verrouillage maximal contre le morphing vers la star. */
 function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
   const dual = hasCelebrityReferenceImage
   return [
-    '⚠️⚠️ ABSOLUTE PRIORITY — DUAL FACIAL IDENTITY LOCK ⚠️⚠️',
+    '⚠️⚠️ ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK (NON-NEGOTIABLE) ⚠️⚠️',
     dual
       ? 'This task is an IDENTITY-PRESERVING COMPOSITE EDIT using TWO reference photos. It is NOT face generation, NOT face redesign, NOT beautification, NOT a likeness reinterpretation.'
-      : 'This task is an IDENTITY-PRESERVING EDIT of Person A from the reference photo. Person A\'s face must stay pixel-faithful to the reference.',
+      : 'This task is an IDENTITY-PRESERVING EDIT of Person A from the reference photo. Person A\'s face, hair, and head proportions must stay pixel-faithful to image_input[0]. The celebrity match is thematic only — NEVER transfer the celebrity\'s look onto Person A.',
     '',
     'image_input ORDER:',
     dual
       ? '- image_input[0] = Person A (USER) — ground-truth face #1'
-      : '- image_input[0] = Person A (USER) — ground-truth face',
+      : '- image_input[0] = Person A (USER) — sole ground-truth for Person A\'s identity',
     dual ? '- image_input[1] = Person B (CELEBRITY) — ground-truth face #2' : '',
     '',
-    'PERSON A (USER) — HARD LOCK:',
-    '- Copy Person A\'s face EXACTLY from image_input[0]: bone structure, eyes, eyebrows, nose, lips, jawline, cheeks, ears, hairline, skin tone, freckles/marks, age.',
-    '- Do NOT redraw, reinvent, morph, average, smooth, beautify, age-shift, or "improve" Person A\'s face.',
-    '- Do NOT blend Person A with Person B. Zero facial feature transfer in either direction.',
-    '- Allowed changes for Person A ONLY: body pose, outfit, hands, and scene lighting falling on an UNCHANGED face.',
+    'PERSON A (USER) — HARD LOCK (STRICTER THAN SCENE / CELEBRITY):',
+    '- Treat image_input[0] as a biometric template. Person A in the output must look like the SAME photograph of the SAME person, only reposed in a new scene.',
+    '- Copy EXACTLY from image_input[0]: bone structure, skull shape, face width, cheek volume, jawline, chin, forehead, eyes, eye spacing, eyebrows, nose (bridge + tip + nostrils), lips, ears, neck thickness, skin tone, freckles/moles/marks, age, and facial fat distribution.',
+    '- HAIR LOCK: keep the EXACT hair color, undertone (warm/cool), dye/roots if any, texture (straight/wavy/curly/coily), length, volume, parting, hairline, and hairstyle from image_input[0]. Do NOT recolor, lighten, darken, highlight, straighten, curl, thicken, thin, or restyle Person A\'s hair to match the celebrity or the scene.',
+    '- PROPORTION LOCK: do NOT enlarge, widen, puff, inflate, slim, elongate, or "beautify" the face. Do NOT make the face fuller, rounder, thinner, or more angular than in image_input[0]. Keep the same head-to-body scale.',
+    '- Do NOT redraw, reinvent, morph, average, smooth, beautify, age-shift, gender-shift, ethnicity-shift, or "improve" Person A.',
+    '- Do NOT blend Person A with Person B / the celebrity. Zero transfer of hair color, face shape, jaw, lips, eyes, brows, skin tone, or makeup from the celebrity onto Person A.',
+    '- Glasses, facial hair, piercings, and accessories on Person A\'s face must match image_input[0] (present only if present in the reference).',
+    '- Allowed changes for Person A ONLY: body pose, clothing (unless the brief keeps their outfit), hands, and scene lighting falling on an otherwise UNCHANGED face and hair.',
     '',
     ...(dual
       ? [
@@ -694,13 +699,21 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
           '',
           'FAILURE CONDITIONS (either one fails the whole result):',
           '- Person A is not instantly recognizable as the exact same person as image_input[0].',
+          '- Person A\'s hair color/style or face width/volume differs from image_input[0].',
           '- Person B is not instantly recognizable as the exact same person as image_input[1].',
           '- Any face-swap artifact, melted features, hybrid face, or "AI beauty filter" look on either person.',
         ]
       : [
-          'FAILURE CONDITION:',
+          'PERSON B (CELEBRITY) — SEPARATE IDENTITY:',
+          '- Person B is a different person standing next to Person A. Generate Person B\'s own appearance.',
+          '- Never "nudge" Person A toward looking more like Person B (no shared hair color, no shared face fullness, no hybrid look).',
+          '- Looking alike as twins is a FUN LABEL only — visually they remain two distinct people; Person A stays locked to image_input[0].',
+          '',
+          'FAILURE CONDITIONS (any one fails the whole result):',
           '- Person A is not instantly recognizable as the exact same person as image_input[0] → FAILED, even if the scene is perfect.',
-          '- Prefer keeping Person A\'s face unchanged over perfect scene composition.',
+          '- Person A\'s hair color, hair style, or face width/fullness differs from image_input[0] → FAILED.',
+          '- Person A looks partially like the celebrity (hybrid / averaged face) → FAILED.',
+          '- Prefer an imperfect scene over ANY change to Person A\'s face or hair.',
         ]),
   ].filter((line) => line !== '')
 }
@@ -713,7 +726,7 @@ function photorealismBlock(celebrityName: string): string[] {
     `Create a highly believable real-life amateur smartphone photo featuring the user together with ${celeb} in the scene described in the USER SCENE BRIEF below.`,
     '',
     'ABSOLUTE PRIORITY — PRESERVE THE USER\'S IDENTITY EXACTLY:',
-    'Do not redesign, beautify, improve, or reinterpret the user\'s face. Keep the exact facial structure, jawline, nose shape, eye shape, mouth shape, hairstyle, skin tone, glasses if present, and overall likeness. The user must still look exactly like the same real person from the source image, not like an AI-modified version.',
+    'Do not redesign, beautify, improve, reinterpret, fatten, slim, or recolor the user. Keep the exact facial structure, face width, cheek volume, jawline, nose shape, eye shape, mouth shape, hair color, hair texture, hairstyle, skin tone, glasses if present, and overall likeness. The user must still look exactly like the same real person from the source image, not like an AI-modified or celebrity-blended version.',
     '',
     'The image must look like a genuine casual phone photo taken in real life, not like AI art, CGI, a 3D render, or a professional photoshoot. It should feel spontaneous, natural, candid, and slightly imperfect, as if captured quickly in a real moment by a friend or as a casual selfie.',
     '',
@@ -739,12 +752,13 @@ function photorealismBlock(celebrityName: string): string[] {
     'The composition must not feel too perfect or too polished. Avoid a centered commercial look. Let the image feel like a normal everyday snapshot from a phone gallery, Snapchat, BeReal, or Instagram Story. The final image should include subtle imperfections that make it feel real: slightly uneven framing, tiny exposure inconsistencies, natural ambient clutter, and realistic environment details.',
     '',
     'IMPORTANT NEGATIVE REQUIREMENTS:',
-    'Do not make the skin too smooth, do not beautify the face, do not over-sharpen, do not make the image cinematic, do not use studio lighting, do not create a beauty-filter effect, do not make smiles too perfect, do not create fake bokeh, do not overprocess HDR, do not distort objects, do not generate incoherent backgrounds, do not create unrealistic car interiors or strange object shapes, do not make the subjects look like influencers or models, and do not make the result look AI-generated in any way.',
+    'Do not make the skin too smooth, do not beautify the face, do not change the user\'s hair color or hairstyle, do not make the user\'s face fuller/wider/thinner than the reference, do not over-sharpen, do not make the image cinematic, do not use studio lighting, do not create a beauty-filter effect, do not make smiles too perfect, do not create fake bokeh, do not overprocess HDR, do not distort objects, do not generate incoherent backgrounds, do not create unrealistic car interiors or strange object shapes, do not make the subjects look like influencers or models, and do not make the result look AI-generated in any way.',
     '',
-    'AVOID: AI-generated look, CGI, 3D render, waxy skin, doll face, glossy skin, fake symmetry, perfect composition, professional advertising style, fashion-shoot vibes, magazine photography, unrealistic colors, over-detailed textures, unnatural hands, distorted perspective, and artificial background people.',
+    'AVOID: AI-generated look, CGI, 3D render, waxy skin, doll face, glossy skin, fake symmetry, changed hair color, celebrity-hair transplant onto the user, puffy/inflated cheeks, widened jaw, slimmed face, perfect composition, professional advertising style, fashion-shoot vibes, magazine photography, unrealistic colors, over-detailed textures, unnatural hands, distorted perspective, and artificial background people.',
     '',
-    'VARIATION:',
-    '- Randomize camera angle, focal length, distance, lighting, expressions, posture, head orientation, framing, background activity, object placement, and slight imperfections so each generation feels like a different real-life moment.',
+    'VARIATION (scene only — NEVER vary Person A\'s identity):',
+    '- Randomize camera angle, focal length, distance, lighting, Person B expression, posture, framing, background activity, object placement, and slight imperfections so each generation feels like a different real-life moment.',
+    '- Do NOT randomize Person A\'s hair, face shape, facial features, or identity.',
     '',
     'SCENE FIDELITY — FOLLOW THE USER BRIEF LITERALLY:',
     '- Execute the requested location, outfits, and pose EXACTLY as described. Do not substitute a generic VIP / red-carpet / yacht / gala stock scene.',
@@ -778,12 +792,12 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   const subjectLines = [
     dual
       ? '- Person A = face locked from image_input[0]. Person B = face locked from image_input[1].'
-      : '- Person A (USER): face locked from image_input[0] — identity preserved exactly.',
+      : '- Person A (USER): face + hair + head proportions locked from image_input[0] — biometric identity preserved exactly; never morph toward the celebrity.',
     dual
       ? `- Person B name label only (do not reinvent the face): ${celebrityName}${domain ? `, ${domain}` : ''}.`
-      : `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''} — believable likeness beside Person A, WITHOUT changing Person A\'s face.`,
-    !dual && style ? `- Celebrity styling for Person B only (clothes/hair vibe, NOT Person A\'s face): ${style}.` : '',
-    mood ? `- Scene mood / energy only (NOT faces): ${mood}.` : '',
+      : `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''} — separate person beside Person A. Do NOT borrow Person B\'s hair color, face shape, or features for Person A.`,
+    !dual && style ? `- Celebrity styling for Person B only (Person B clothes/vibe ONLY — never Person A\'s hair, face, or makeup): ${style}.` : '',
+    mood ? `- Scene mood / energy only (NOT faces, NOT Person A\'s hair): ${mood}.` : '',
   ]
 
   const requirements = [
@@ -806,15 +820,17 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
       ]
     : [
         'FINAL MANDATORY CHECK:',
-        '1) Compare Person A\'s output face to image_input[0] — must look like an unedited crop of the same face.',
-        '2) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
-        '3) Does the scene match the user brief specifically? If not, fix the scene.',
-        '4) Face integrity > scene beauty, but face lock AND amateur-phone realism AND brief fidelity are all required.',
+        '1) Compare Person A\'s output face to image_input[0] — same person, same face width/volume, same features, unedited identity.',
+        '2) Compare Person A\'s hair to image_input[0] — same color, texture, length, and style (no celebrity hair transplant).',
+        '3) Person A must NOT look like a blend/average with the celebrity.',
+        '4) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
+        '5) Does the scene match the user brief specifically? If not, fix the scene.',
+        '6) Face + hair integrity of Person A > scene beauty. If identity drifted, the result is invalid.',
       ]
 
   const opener = dual
     ? 'IDENTITY-PRESERVING COMPOSITE: keep BOTH reference faces exactly intact while placing Person A and Person B together in a NEW scene that faithfully matches the user brief — output must look like a genuine amateur smartphone photo.'
-    : 'IDENTITY-PRESERVING EDIT: keep Person A\'s face exactly intact from the reference while placing them in a scene with a celebrity — output must look like a genuine amateur smartphone photo that faithfully matches the user brief.'
+    : 'IDENTITY-PRESERVING EDIT: keep Person A\'s face, hair color, hairstyle, and head proportions EXACTLY intact from image_input[0] while placing them in a scene with a celebrity — never morph Person A toward the celebrity. Output must look like a genuine amateur smartphone photo that faithfully matches the user brief.'
 
   const interactionPrompt = getInteractionPrompt(interaction)
   const interactionLine = interactionPrompt

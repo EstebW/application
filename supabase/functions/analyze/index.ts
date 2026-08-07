@@ -8,43 +8,194 @@ const CORS = {
 const KIE_API_BASE = 'https://api.kie.ai'
 const ANALYZE_MODEL = 'gemini-3-flash'
 const ANALYZE_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
+const ANALYZE_TEMPERATURE = 0.2
 
-const ANALYZE_SYSTEM = `Tu es le moteur facial avancé de "StarFusion", un jeu de divertissement.
-Ta mission : trouver le "jumeau célèbre" le plus crédible pour le visage analysé — pas forcément une mega-star mondiale, mais une personnalité RÉELLEMENT connue (reconnaissable) dont les traits collent le mieux.
-Ce n'est PAS une identification biométrique officielle : c'est un matching de ressemblance pour le fun.
-Tu dois toujours répondre par un objet JSON valide, sans markdown ni texte autour.`
+// ── Score StarFusion (inline — Deno ne peut pas importer lib/) ──────────────
 
-const ANALYZE_PROMPT = `Analyse le visage sur cette photo avec une approche de matching facial étendue.
+const FEATURE_SCORE_KEYS = [
+  'facialProportions',
+  'faceShape',
+  'eyes',
+  'jawChin',
+  'nose',
+  'cheekbones',
+  'mouth',
+  'eyebrows',
+] as const
 
-OBJECTIF
-Trouve la personnalité célèbre à laquelle cette personne ressemble le PLUS, en priorisant la ressemblance faciale réelle — pas le niveau de célébrité.
+type FeatureScoreKey = (typeof FEATURE_SCORE_KEYS)[number]
+type FeatureScores = Record<FeatureScoreKey, number>
 
-CHAMP DE RECHERCHE (extensible — ne te limite PAS aux 20 ultra-stars les plus connues)
-Cherche dans un large panel de personnalités reconnaissables, par exemple :
-- cinéma / séries (acteurs connus, seconds rôles iconiques, stars TV)
-- musique (chanteurs, rappeurs, DJs connus)
-- sport (athlètes pro, anciens champions)
-- mode / mannequinat
-- comedy / TV / streaming
-- personnalités publiques reconnues (présentateurs, créateurs très connus, etc.)
-Préfère toujours le MEILLEUR match facial, même si la personne est "connue" plutôt que "ultra-légendaire".
-Évite les noms trop génériques ou inventés. Le nom doit être une vraie personnalité identifiable.
+const STARFUSION_SCORE_WEIGHTS: Record<FeatureScoreKey, number> = {
+  facialProportions: 0.2,
+  faceShape: 0.2,
+  eyes: 0.15,
+  jawChin: 0.15,
+  nose: 0.1,
+  cheekbones: 0.08,
+  mouth: 0.07,
+  eyebrows: 0.05,
+}
 
-Réponds UNIQUEMENT avec un objet JSON valide :
+function clampScore(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.max(0, Math.min(100, value))
+}
+
+function parseFeatureScores(raw: unknown): FeatureScores | null {
+  if (!raw || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  const out = {} as FeatureScores
+  for (const key of FEATURE_SCORE_KEYS) {
+    const v = clampScore(obj[key])
+    if (v === null) return null
+    out[key] = v
+  }
+  return out
+}
+
+function calculateStarFusionSimilarityScore(featureScores: FeatureScores): number {
+  let total = 0
+  for (const key of FEATURE_SCORE_KEYS) {
+    total += featureScores[key] * STARFUSION_SCORE_WEIGHTS[key]
+  }
+  return Math.round(total)
+}
+
+function rankCandidatesByScore<T extends { featureScores: FeatureScores }>(
+  candidates: T[],
+): Array<T & { score: number }> {
+  return candidates
+    .map((c) => ({ ...c, score: calculateStarFusionSimilarityScore(c.featureScores) }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      const dProp = b.featureScores.facialProportions - a.featureScores.facialProportions
+      if (dProp !== 0) return dProp
+      return b.featureScores.faceShape - a.featureScores.faceShape
+    })
+}
+
+function buildExplanationFromSimilarities(similarities: string[], differences: string[]): string {
+  const sims = similarities.filter((s) => typeof s === 'string' && s.trim()).slice(0, 3)
+  const diffs = differences.filter((s) => typeof s === 'string' && s.trim()).slice(0, 2)
+
+  if (sims.length === 0) {
+    return 'La ressemblance repose sur plusieurs traits de structure faciale observés sur la photo.'
+  }
+
+  let text = ''
+  if (sims.length === 1) {
+    text = `Le point commun le plus marqué : ${sims[0].replace(/\.$/, '')}.`
+  } else if (sims.length === 2) {
+    text = `Votre ressemblance se concentre particulièrement autour de ${sims[0].replace(/\.$/, '')}, ainsi que ${sims[1].replace(/\.$/, '')}.`
+  } else {
+    text = `Votre ressemblance se concentre particulièrement autour de ${sims[0].replace(/\.$/, '')}. ${sims[1].replace(/\.$/, '')}, tandis que ${sims[2].replace(/\.$/, '')} renforce encore la similarité.`
+  }
+
+  if (diffs.length > 0) {
+    text += ` ${diffs[0].replace(/\.$/, '')} explique en partie pourquoi le score n'est pas maximal.`
+  }
+
+  return text
+}
+
+// ── Prompts Gemini ──────────────────────────────────────────────────────────
+
+const MORPHOLOGY_SYSTEM = `Tu es le moteur d'analyse morphologique de StarFusion.
+Tu décris UNIQUEMENT la structure visuelle du visage fourni.
+Tu ne nommes AUCUNE célébrité.
+Tu ne fais AUCUNE déduction sur l'origine ethnique, la religion, l'orientation sexuelle, la santé, les opinions politiques, la personnalité ou l'intelligence.
+Tu réponds UNIQUEMENT par un objet JSON valide, sans markdown.`
+
+const MORPHOLOGY_PROMPT = `Analyse précisément le visage sur cette photo. Ignore autant que possible coiffure, barbe, lunettes, vêtements, décor, expression, sourire, lumière et maquillage.
+
+Décris les caractéristiques STRUCTURELLES stables :
+
+Réponds UNIQUEMENT avec ce JSON :
 {
-  "celebrity_name": "Prénom Nom",
-  "celebrity_domain": "Acteur",
-  "similarity_percentage": 84,
-  "common_traits": ["trait facial 1", "trait facial 2", "trait facial 3"],
-  "celebrity_style_description": "description visuelle (coiffure, style, allure) — SANS décrire le visage de l'utilisateur",
-  "fun_fact": "une phrase fun sur la ressemblance"
+  "faceShape": "forme globale + rapport largeur/longueur",
+  "forehead": "largeur, hauteur, structure",
+  "eyebrows": "forme, épaisseur, orientation, distance aux yeux",
+  "eyes": "forme, taille relative, espacement, orientation, ouverture, position",
+  "nose": "longueur relative, largeur, forme, projection, rapports",
+  "cheekbones": "largeur, position, définition",
+  "jawChin": "mâchoire (largeur, angle, définition) + menton (largeur, forme, projection)",
+  "mouth": "largeur, forme, proportions des lèvres, distance nez-bouche",
+  "facialProportions": "tiers du visage et rapports yeux/nez/bouche/mâchoire/menton",
+  "error": null
+}
+
+Si aucun visage exploitable : {"error":"visage non détecté"}`
+
+const MATCH_SYSTEM = `Tu es le moteur d'analyse morphologique de StarFusion.
+
+Ton objectif est d'identifier les célébrités dont la STRUCTURE FACIALE ressemble le plus au visage fourni.
+
+Tu dois analyser le visage avant de penser à des célébrités.
+Ne fais pas un choix basé sur une impression générale.
+Ne sélectionne pas la célébrité la plus populaire ni celle qui a la même coiffure.
+
+Ignore autant que possible : coiffure, couleur des cheveux, barbe, lunettes, vêtements, décor, expression, sourire, lumière, maquillage.
+
+Compare au minimum 8 candidats en interne, puis retourne exactement les 3 meilleurs.
+
+Pour chaque finaliste, retourne des sous-scores 0–100 (similarité VISUELLE relative, PAS une preuve biométrique ni un % d'identité) pour :
+faceShape, eyes, eyebrows, nose, jawChin, cheekbones, mouth, facialProportions
+
+Ne retourne PAS de score global : il sera calculé par le backend.
+
+Sois spécifique au visage observé. Évite les formulations génériques.
+N'invente aucune caractéristique non visible.
+Aucune inférence sensible (ethnicité, religion, santé, etc.).
+
+Réponds UNIQUEMENT par un objet JSON valide, sans markdown.`
+
+function buildMatchPrompt(faceAnalysisJson: string): string {
+  return `Voici l'analyse morphologique déjà établie du visage utilisateur (à respecter comme base) :
+${faceAnalysisJson}
+
+En t'appuyant sur cette analyse ET sur la photo, trouve les 3 célébrités (vraies personnalités identifiables) dont la structure faciale colle le mieux.
+
+Réponds UNIQUEMENT avec ce JSON :
+{
+  "candidates": [
+    {
+      "name": "Prénom Nom",
+      "celebrity_domain": "Acteur",
+      "celebrity_style_description": "style vestimentaire / allure de la star — SANS décrire le visage de l'utilisateur",
+      "featureScores": {
+        "faceShape": 88,
+        "eyes": 91,
+        "eyebrows": 78,
+        "nose": 81,
+        "jawChin": 85,
+        "cheekbones": 84,
+        "mouth": 74,
+        "facialProportions": 90
+      },
+      "strongestSimilarities": [
+        "similitude concrète 1",
+        "similitude concrète 2",
+        "similitude concrète 3"
+      ],
+      "mainDifferences": [
+        "différence concrète 1",
+        "différence concrète 2"
+      ]
+    }
+  ]
 }
 
 Règles :
-- similarity_percentage entre 65 et 95 (plus la ressemblance faciale est forte, plus le score est haut)
-- common_traits = traits FACIAUX concrets (forme du visage, yeux, nez, mâchoire, sourcils, etc.)
-- celebrity_domain en français court (ex: Acteur, Chanteur, Sportif, Mannequin, Humoriste, Influenceur)
-- si aucun visage visible : {"error":"visage non détecté"}`
+- exactement 3 candidats dans "candidates"
+- celebrity_domain en français court (Acteur, Chanteur, Sportif, Mannequin, Humoriste, Influenceur, etc.)
+- featureScores : nombres 0–100, cohérents avec l'analyse
+- strongestSimilarities : 3 traits STRUCTURELS précis
+- mainDifferences : 1 à 3 différences structurelles
+- si aucun visage : {"error":"visage non détecté"}`
+}
+
+// ── Helpers kie.ai ──────────────────────────────────────────────────────────
 
 function toRawBase64(base64: string) {
   return base64.replace(/^data:image\/\w+;base64,/, '')
@@ -102,6 +253,7 @@ async function callKieVision(messages: unknown[], apiKey: string): Promise<strin
       messages,
       stream: false,
       reasoning_effort: 'medium',
+      temperature: ANALYZE_TEMPERATURE,
     }),
   })
 
@@ -128,6 +280,105 @@ async function callKieVision(messages: unknown[], apiKey: string): Promise<strin
   return raw
 }
 
+async function callWithOptionalRetry(
+  messages: unknown[],
+  apiKey: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const raw = await callKieVision(messages, apiKey)
+    return extractJsonObject(raw)
+  } catch (firstErr) {
+    const retryMessages = [
+      ...messages,
+      {
+        role: 'user',
+        content: 'Ta réponse précédente était invalide. Renvoie UNIQUEMENT l\'objet JSON demandé, sans markdown ni texte autour.',
+      },
+    ]
+    try {
+      const raw = await callKieVision(retryMessages, apiKey)
+      return extractJsonObject(raw)
+    } catch {
+      throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
+    }
+  }
+}
+
+function parseStringList(raw: unknown, max = 5): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+    .map((t) => t.trim())
+    .slice(0, max)
+}
+
+function buildCelebrityResult(parsed: Record<string, unknown>) {
+  if (typeof parsed.error === 'string') throw new Error(`Analyse : ${parsed.error}`)
+
+  const list = parsed.candidates
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new Error('Aucun candidat exploitable renvoyé par l\'analyse')
+  }
+
+  const rawCandidates: Array<{
+    name: string
+    celebrity_domain: string
+    celebrity_style_description: string
+    featureScores: FeatureScores
+    strongestSimilarities: string[]
+    mainDifferences: string[]
+  }> = []
+
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue
+    const c = item as Record<string, unknown>
+    const name = typeof c.name === 'string' ? c.name.trim() : ''
+    if (!name) continue
+    const featureScores = parseFeatureScores(c.featureScores)
+    if (!featureScores) continue
+    const strongestSimilarities = parseStringList(c.strongestSimilarities, 3)
+    if (strongestSimilarities.length === 0) continue
+    rawCandidates.push({
+      name,
+      celebrity_domain: typeof c.celebrity_domain === 'string' ? c.celebrity_domain.trim() : '',
+      celebrity_style_description:
+        typeof c.celebrity_style_description === 'string' ? c.celebrity_style_description.trim() : '',
+      featureScores,
+      strongestSimilarities,
+      mainDifferences: parseStringList(c.mainDifferences, 3),
+    })
+  }
+
+  if (rawCandidates.length === 0) {
+    throw new Error('Aucun candidat valide après validation des sous-scores')
+  }
+
+  const ranked = rankCandidatesByScore(rawCandidates)
+  const top3 = ranked.slice(0, 3)
+  const winner = top3[0]
+
+  return {
+    name: winner.name,
+    celebrity_domain: winner.celebrity_domain,
+    score: winner.score,
+    traits: winner.strongestSimilarities.slice(0, 3),
+    celebrity_style_description: winner.celebrity_style_description,
+    fun_fact: buildExplanationFromSimilarities(
+      winner.strongestSimilarities,
+      winner.mainDifferences,
+    ),
+    featureScores: winner.featureScores,
+    runnersUp: top3.slice(1).map((c) => ({
+      name: c.name,
+      celebrity_domain: c.celebrity_domain,
+      score: c.score,
+      featureScores: c.featureScores,
+      strongestSimilarities: c.strongestSimilarities,
+      mainDifferences: c.mainDifferences,
+    })),
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: CORS })
@@ -147,36 +398,43 @@ Deno.serve(async (req: Request) => {
 
     const imageUrl = toDataUrl(imageBase64)
 
-    const raw = await callKieVision(
+    // Étape A — morphologie
+    const morphologyParsed = await callWithOptionalRetry(
       [
-        { role: 'system', content: ANALYZE_SYSTEM },
+        { role: 'system', content: MORPHOLOGY_SYSTEM },
         {
           role: 'user',
           content: [
-            { type: 'text', text: ANALYZE_PROMPT },
+            { type: 'text', text: MORPHOLOGY_PROMPT },
             { type: 'image_url', image_url: { url: imageUrl } },
           ],
         },
       ],
-      kieKey
+      kieKey,
     )
 
-    console.log(`[analyze] ${ANALYZE_MODEL} raw:`, raw)
-
-    const parsed = extractJsonObject(raw)
-    if (typeof parsed.error === 'string') throw new Error(`Analyse : ${parsed.error}`)
-
-    const result = {
-      name: typeof parsed.celebrity_name === 'string' ? parsed.celebrity_name : 'Célébrité inconnue',
-      celebrity_domain: typeof parsed.celebrity_domain === 'string' ? parsed.celebrity_domain : '',
-      score: typeof parsed.similarity_percentage === 'number' ? parsed.similarity_percentage : 75,
-      traits: Array.isArray(parsed.common_traits)
-        ? parsed.common_traits.filter((t): t is string => typeof t === 'string')
-        : [],
-      celebrity_style_description:
-        typeof parsed.celebrity_style_description === 'string' ? parsed.celebrity_style_description : '',
-      fun_fact: typeof parsed.fun_fact === 'string' ? parsed.fun_fact : '',
+    if (typeof morphologyParsed.error === 'string' && morphologyParsed.error) {
+      throw new Error(`Analyse : ${morphologyParsed.error}`)
     }
+
+    // Étape B — candidats + sous-scores
+    const matchParsed = await callWithOptionalRetry(
+      [
+        { role: 'system', content: MATCH_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: buildMatchPrompt(JSON.stringify(morphologyParsed)) },
+            { type: 'image_url', image_url: { url: imageUrl } },
+          ],
+        },
+      ],
+      kieKey,
+    )
+
+    console.log('[analyze] match candidates:', JSON.stringify(matchParsed).slice(0, 800))
+
+    const result = buildCelebrityResult(matchParsed)
 
     let analysisId: string | undefined
     if (sessionId || userId) {

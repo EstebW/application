@@ -227,7 +227,7 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
           </span>
         </h2>
         <p className="text-[#808080] text-sm">
-          {showMatchScore ? `${score}% de ressemblance · ` : ''}Version HD sans watermark
+          {showMatchScore ? `Score ${score} / 100 · ` : ''}Version HD sans watermark
         </p>
       </motion.div>
 
@@ -375,12 +375,12 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
             style={{ background: 'linear-gradient(135deg,rgba(212,175,55,0.15),rgba(212,175,55,0.08))', border: '1px solid rgba(212,175,55,0.3)' }}
           >
             <span className="text-[#D4AF37] text-xl font-black leading-none">{score}</span>
-            <span className="text-[#D4AF37]/50 text-[9px] font-bold">%</span>
+            <span className="text-[#D4AF37]/50 text-[9px] font-bold">/100</span>
           </motion.div>
           <div>
-            <p className="text-white text-sm font-bold">Ressemblance confirmée</p>
+            <p className="text-white text-sm font-bold">Score de ressemblance StarFusion</p>
             <p className="text-[#606060] text-xs mt-0.5">
-              Moins de 3% des gens dépassent 85% — tu fais partie de l&apos;élite
+              Calculé à partir de l&apos;analyse morphologique de ton visage
             </p>
           </div>
         </motion.div>

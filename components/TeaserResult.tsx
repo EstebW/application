@@ -89,10 +89,10 @@ export default function TeaserResult({ celebrity, preview, onReveal }: TeaserRes
                       WebkitTextFillColor: 'transparent',
                       backgroundClip: 'text',
                     }}>
-                    {score}%
+                    {score}
                   </span>
                   <span className="text-[#D4AF37]/60 text-[10px] font-bold mt-0.5 uppercase tracking-wider">
-                    ressemblance
+                    / 100 · ressemblance
                   </span>
                 </motion.div>
               </div>
@@ -167,7 +167,7 @@ export default function TeaserResult({ celebrity, preview, onReveal }: TeaserRes
         <motion.div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0"
           animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1.2, repeat: Infinity }} />
         <p className="text-[#808080] text-xs">
-          {score >= 85 ? 'Ressemblance rarissime — top 3% des visages analysés' : 'Résultat prêt · Valable 24h seulement'}
+          {score >= 85 ? 'Ressemblance particulièrement marquée' : 'Résultat prêt · Valable 24h seulement'}
         </p>
       </motion.div>
 
