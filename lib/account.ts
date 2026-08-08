@@ -23,6 +23,9 @@ export interface AccountTransaction {
   amount: number
   reason: string
   created_at: string
+  /** Libellé lisible (ex. « Abonnement hebdomadaire », « Photo avec Messi ») */
+  label?: string | null
+  reference_id?: string | null
 }
 
 export interface AccountData {
@@ -32,6 +35,8 @@ export interface AccountData {
   creditsBalance: number
   subscriptionPlan: string | null
   subscriptionExpiresAt: string | null
+  /** Client Stripe lié au compte — requis pour le Customer Portal */
+  stripeCustomerId?: string | null
   /** Taille déclarée — absente tant que l'utilisateur n'a pas fait le parcours « Choisis ta star » */
   heightCm?: number | null
   analyses: AccountAnalysis[]

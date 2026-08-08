@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Lock, ChevronRight, Check, Shield, Zap, Crown, TrendingDown, Flame } from 'lucide-react'
-import { callFunction, FunctionCallError } from '@/lib/functions'
 import { PLAN_CREDITS } from '@/lib/plans'
+import { saveCheckoutReturnContext } from '@/lib/checkout-return'
 
 interface PaymentScreenProps {
   sessionId?: string
@@ -15,9 +15,12 @@ interface PaymentScreenProps {
   /** Solde actuel — si > 0, propose de continuer sans re-payer */
   creditsBalance?: number
   onSuccess: (creditsBalance: number) => void
+  /** Contexte de retour après Stripe Checkout */
+  returnTo?: 'home' | 'dashboard'
+  appMode?: 'match' | 'custom' | null
+  checkoutContext?: Omit<import('@/lib/checkout-return').CheckoutReturnContext, 'createdAt' | 'returnTo' | 'appMode' | 'generationId'>
 }
 
-type PayMethod = 'card' | 'apple' | 'paypal'
 type PlanId = 'once' | 'weekly' | 'monthly'
 
 interface Plan {
@@ -47,7 +50,7 @@ const PLANS: Plan[] = [
     sublabel: 'Accès unique',
     price: '2,99€',
     perUnit: 'paiement unique',
-    credits: 1,
+    credits: PLAN_CREDITS.once,
     pricePerCredit: '2,99€',
     color: '#A0A0A0',
     includes: [
@@ -66,7 +69,7 @@ const PLANS: Plan[] = [
     badge: '-80%',
     badgeColor: '#60a5fa',
     perUnit: 'par semaine',
-    credits: 10,
+    credits: PLAN_CREDITS.weekly,
     pricePerCredit: '0,60€',
     savings: 'économie de 80%',
     savingsPercent: 80,
@@ -82,104 +85,99 @@ const PLANS: Plan[] = [
     id: 'monthly',
     icon: Crown,
     label: 'Mensuel',
-    sublabel: 'Par mois',
+    sublabel: 'Le plus populaire',
     price: '12,99€',
     oldPrice: '119,60€',
-    badge: 'MEILLEURE OFFRE',
+    badge: 'BEST',
     badgeColor: '#D4AF37',
     recommended: true,
     perUnit: 'par mois',
-    credits: 40,
+    credits: PLAN_CREDITS.monthly,
     pricePerCredit: '0,32€',
     savings: 'économie de 89%',
     savingsPercent: 89,
     color: '#D4AF37',
     includes: [
-      '40 crédits / mois (4× plus que l\'hebdo)',
+      '40 crédits / mois',
       '40 photos IA avec tes stars',
-      'Accès prioritaire nouveaux modèles',
       'Renouvellement automatique',
       'Version HD · Sans watermark',
+      'Priorité de génération',
     ],
   },
 ]
 
-function formatCardNumber(v: string) {
-  return v.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim()
-}
-function formatExpiry(v: string) {
-  const digits = v.replace(/\D/g, '').slice(0, 4)
-  if (digits.length >= 3) return digits.slice(0, 2) + '/' + digits.slice(2)
-  return digits
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.08 } },
 }
 
-const containerVariants = {
-  hidden: {},
-  visible: { transition: { staggerChildren: 0.08 } },
-}
 const item = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const } },
 }
 
-export default function PaymentScreen({ sessionId, userId, email, generationId, score, creditsBalance = 0, onSuccess }: PaymentScreenProps) {
+export default function PaymentScreen({
+  sessionId,
+  userId,
+  email,
+  generationId,
+  score,
+  creditsBalance = 0,
+  onSuccess,
+  returnTo = 'home',
+  appMode = null,
+  checkoutContext,
+}: PaymentScreenProps) {
   const [plan, setPlan] = useState<PlanId>('monthly')
-  const [method, setMethod] = useState<PayMethod>('card')
-  const [cardNumber, setCardNumber] = useState('')
-  const [expiry, setExpiry] = useState('')
-  const [cvc, setCvc] = useState('')
   const [payEmail, setEmail] = useState(email ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   const selectedPlan = PLANS.find((p) => p.id === plan)!
-
-  const isCardValid =
-    cardNumber.replace(/\s/g, '').length === 16 &&
-    expiry.length === 5 &&
-    cvc.length >= 3 &&
-    payEmail.includes('@')
-
-  const canPay = method !== 'card' || isCardValid
+  const billingEmail = email ?? (payEmail.includes('@') ? payEmail.trim() : undefined)
+  const needsEmail = !email && !userId
+  const canPay = Boolean(sessionId || userId || billingEmail) && (!needsEmail || Boolean(billingEmail))
 
   async function handlePay() {
-    if (!canPay) { setError('Vérifie les informations de paiement'); return }
-    setError('')
-    setLoading(true)
-
-    const billingEmail = email ?? (payEmail.includes('@') ? payEmail.trim() : undefined)
-
-    if (!sessionId && !userId && !billingEmail) {
-      setLoading(false)
-      setError('Impossible d\'identifier ton compte. Recharge la page et réessaie.')
+    if (!canPay) {
+      setError(needsEmail ? 'Entre ton email pour continuer' : 'Impossible d\'identifier ton compte')
       return
     }
 
-    const delay = new Promise((r) => setTimeout(r, 2200))
+    setError('')
+    setLoading(true)
 
     try {
-      // Paiement simulé (carte/Apple/PayPal toujours acceptés), MAIS le crédit
-      // en base est réel : on attend la vraie confirmation du serveur avant
-      // de laisser l'utilisateur continuer, pour ne jamais afficher un solde
-      // qui n'existe pas réellement côté base de données.
-      const [paymentResult] = await Promise.all([
-        callFunction<{ creditsBalance: number }>('payment', {
+      saveCheckoutReturnContext({
+        returnTo,
+        appMode,
+        generationId,
+        ...checkoutContext,
+      })
+
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan,
           sessionId,
           userId,
           email: billingEmail,
           generationId,
-          method,
-          plan,
+          returnTo,
         }),
-        delay,
-      ])
+      })
 
-      setLoading(false)
-      onSuccess(paymentResult.creditsBalance)
+      const data = (await res.json()) as { url?: string; error?: string }
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Impossible de démarrer le paiement Stripe')
+      }
+
+      window.location.href = data.url
     } catch (err) {
       setLoading(false)
-      const message = err instanceof FunctionCallError ? err.message : 'Erreur lors du paiement, réessaie.'
-      setError(`Le crédit n'a pas pu être enregistré (${message}). Réessaie ou contacte le support.`)
+      setError(err instanceof Error ? err.message : 'Erreur lors du paiement, réessaie.')
     }
   }
 
@@ -189,13 +187,11 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
   return (
     <motion.div variants={containerVariants} initial="hidden" animate="visible" className="flex flex-col gap-5 w-full">
 
-      {/* ── Header sécurité ── */}
       <motion.div variants={item} className="flex items-center justify-center gap-1.5">
         <Shield size={13} className="text-emerald-400" />
-        <span className="text-emerald-400 text-[11px] font-semibold">Paiement 100% sécurisé · SSL</span>
+        <span className="text-emerald-400 text-[11px] font-semibold">Paiement sécurisé via Stripe</span>
       </motion.div>
 
-      {/* ── Headline ── */}
       <motion.div variants={item} className="text-center space-y-1">
         <h2 className="text-2xl font-black text-white"
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
@@ -232,7 +228,6 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
         </motion.button>
       )}
 
-      {/* ── Sélecteur de plan ── */}
       <motion.div variants={item} className="space-y-2.5">
         <p className="text-[#606060] text-xs uppercase tracking-widest font-semibold">
           {creditsBalance > 0 ? 'Ou recharge ton solde' : 'Choisis ton offre'}
@@ -257,7 +252,6 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
               }}
               whileTap={{ scale: 0.99 }}
             >
-              {/* Badge top-right */}
               {p.badge && (
                 <div className="absolute top-0 right-0">
                   <div
@@ -267,7 +261,6 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
                         ? 'linear-gradient(135deg,#D4AF37,#F0D060)'
                         : `${p.color}30`,
                       color: p.recommended ? '#000' : p.color,
-                      border: p.recommended ? 'none' : `1px solid ${p.color}50`,
                     }}
                   >
                     {p.badge}
@@ -276,30 +269,41 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
               )}
 
               <div className="flex items-start gap-3">
-                {/* Radio */}
-                <div className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5"
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: `${p.color}18`, border: `1px solid ${p.color}30` }}
+                >
+                  <Icon size={18} style={{ color: p.color }} />
+                </div>
+
+                <div
+                  className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5"
                   style={{
                     border: isSelected ? `2px solid ${p.color}` : '2px solid rgba(255,255,255,0.15)',
                     background: isSelected ? `${p.color}20` : 'transparent',
-                  }}>
+                  }}
+                >
                   {isSelected && (
-                    <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
                       className="w-2.5 h-2.5 rounded-full"
-                      style={{ background: p.color }} />
+                      style={{ background: p.color }}
+                    />
                   )}
                 </div>
 
-                {/* Content */}
                 <div className="flex-1 min-w-0 space-y-2">
-                  {/* Name + credit count */}
                   <div className="flex items-center justify-between">
                     <div>
                       <span className={`text-sm font-bold ${isSelected ? 'text-white' : 'text-[#808080]'}`}>
                         {p.label}
                       </span>
                       {p.savings && isSelected && (
-                        <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-md"
-                          style={{ background: `${p.color}18`, color: p.color }}>
+                        <span
+                          className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-md"
+                          style={{ background: `${p.color}18`, color: p.color }}
+                        >
                           {p.savings}
                         </span>
                       )}
@@ -308,26 +312,25 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
                       {p.oldPrice && (
                         <p className="text-[#444] text-[10px] line-through">{p.oldPrice}</p>
                       )}
-                      <p className={`text-base font-black ${isSelected ? '' : 'text-[#606060]'}`}
-                        style={isSelected ? { color: p.color } : {}}>
+                      <p
+                        className={`text-base font-black ${isSelected ? '' : 'text-[#606060]'}`}
+                        style={isSelected ? { color: p.color } : {}}
+                      >
                         {p.price}
                       </p>
                       <p className="text-[#444] text-[9px]">{p.perUnit}</p>
                     </div>
                   </div>
 
-                  {/* Credits bar */}
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-[#606060]'}`}>
                         {p.credits} crédit{p.credits > 1 ? 's' : ''}
                       </span>
-                      <span className="text-[10px]"
-                        style={{ color: isSelected ? p.color : '#505050' }}>
+                      <span className="text-[10px]" style={{ color: isSelected ? p.color : '#505050' }}>
                         {p.pricePerCredit} / crédit
                       </span>
                     </div>
-                    {/* Visual credit bar */}
                     <div className="h-1.5 w-full rounded-full bg-[#1A1A1A] overflow-hidden">
                       <motion.div
                         className="h-full rounded-full"
@@ -348,7 +351,6 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
         })}
       </motion.div>
 
-      {/* ── Comparatif économie ── */}
       <AnimatePresence mode="wait">
         <motion.div
           key={plan}
@@ -360,9 +362,12 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
           style={{
             border: `1px solid ${selectedPlan.color}30`,
             background: `linear-gradient(135deg,${selectedPlan.color}06,transparent)`,
-          }}>
-          <div className="h-px w-full"
-            style={{ background: `linear-gradient(90deg,transparent,${selectedPlan.color}50,transparent)` }} />
+          }}
+        >
+          <div
+            className="h-px w-full"
+            style={{ background: `linear-gradient(90deg,transparent,${selectedPlan.color}50,transparent)` }}
+          />
           <div className="p-4 space-y-2.5">
             <div className="flex items-center gap-2">
               <Flame size={13} style={{ color: selectedPlan.color }} />
@@ -372,99 +377,47 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
             </div>
             {selectedPlan.includes.map((inc) => (
               <div key={inc} className="flex items-center gap-2.5">
-                <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0"
+                <div
+                  className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0"
                   style={{
                     background: `${selectedPlan.color}15`,
                     border: `1px solid ${selectedPlan.color}30`,
-                  }}>
+                  }}
+                >
                   <Check size={8} style={{ color: selectedPlan.color }} />
                 </div>
                 <span className="text-[#A0A0A0] text-xs">{inc}</span>
               </div>
             ))}
-
-            {/* Savings callout */}
-            {selectedPlan.savingsPercent && (
-              <div className="mt-1 pt-2.5 border-t flex items-center justify-between"
-                style={{ borderColor: `${selectedPlan.color}15` }}>
-                <span className="text-[#606060] text-xs">vs One Shot (2,99€/crédit)</span>
-                <span className="text-sm font-black" style={{ color: selectedPlan.color }}>
-                  -{selectedPlan.savingsPercent}%
-                </span>
-              </div>
-            )}
           </div>
         </motion.div>
       </AnimatePresence>
 
-      {/* ── Méthode de paiement ── */}
-      <motion.div variants={item} className="space-y-3">
-        <p className="text-[#606060] text-xs uppercase tracking-widest font-semibold">Méthode de paiement</p>
-        <div className="grid grid-cols-3 gap-2">
-          {(['card', 'apple', 'paypal'] as PayMethod[]).map((m) => {
-            const labels: Record<PayMethod, string> = { card: 'Carte', apple: 'Apple Pay', paypal: 'PayPal' }
-            const isActive = method === m
-            return (
-              <button key={m} onClick={() => setMethod(m)}
-                className="py-3 rounded-xl text-xs font-bold transition-all"
-                style={{
-                  background: isActive ? 'rgba(212,175,55,0.1)' : 'rgba(255,255,255,0.03)',
-                  border: isActive ? '1.5px solid rgba(212,175,55,0.45)' : '1.5px solid rgba(255,255,255,0.06)',
-                  color: isActive ? '#D4AF37' : '#606060',
-                }}>
-                {labels[m]}
-              </button>
-            )
-          })}
-        </div>
-      </motion.div>
+      {needsEmail && (
+        <motion.div variants={item}>
+          <input
+            type="email"
+            placeholder="Email (reçu Stripe + accès)"
+            value={payEmail}
+            onChange={(e) => setEmail(e.target.value)}
+            className={inputClass}
+          />
+        </motion.div>
+      )}
 
-      {/* ── Formulaire carte ── */}
-      <AnimatePresence mode="wait">
-        {method === 'card' && (
-          <motion.div key="card-form" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }} className="space-y-3">
-            <input type="email" placeholder="Email (reçois ton accès ici)"
-              value={payEmail} onChange={(e) => setEmail(e.target.value)} className={inputClass} />
-            <input type="text" placeholder="1234 5678 9012 3456" inputMode="numeric"
-              value={cardNumber} onChange={(e) => setCardNumber(formatCardNumber(e.target.value))} className={inputClass} />
-            <div className="grid grid-cols-2 gap-3">
-              <input type="text" placeholder="MM/AA" inputMode="numeric"
-                value={expiry} onChange={(e) => setExpiry(formatExpiry(e.target.value))} className={inputClass} />
-              <input type="text" placeholder="CVC" inputMode="numeric" maxLength={4}
-                value={cvc} onChange={(e) => setCvc(e.target.value.replace(/\D/g, '').slice(0, 4))} className={inputClass} />
-            </div>
-          </motion.div>
-        )}
-        {method === 'apple' && (
-          <motion.div key="apple-msg" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }}
-            className="rounded-xl p-4 text-center"
-            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-            <p className="text-[#A0A0A0] text-sm">Confirme via Face ID ou Touch ID</p>
-          </motion.div>
-        )}
-        {method === 'paypal' && (
-          <motion.div key="paypal-msg" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }}
-            className="rounded-xl p-4 text-center"
-            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-            <p className="text-[#A0A0A0] text-sm">Tu seras redirigé vers PayPal pour finaliser</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Erreur ── */}
       <AnimatePresence>
         {error && (
-          <motion.p initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="text-red-400 text-xs text-center -mt-2">
+          <motion.p
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="text-red-400 text-xs text-center -mt-2"
+          >
             {error}
           </motion.p>
         )}
       </AnimatePresence>
 
-      {/* ── CTA ── */}
       <motion.button
         onClick={handlePay}
         disabled={loading}
@@ -475,27 +428,39 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
       >
         <AnimatePresence mode="wait">
           {loading ? (
-            <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="flex items-center gap-3">
-              <motion.div className="w-5 h-5 rounded-full border-2 border-black/40 border-t-black"
-                animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
-              Traitement…
+            <motion.div
+              key="loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-3"
+            >
+              <motion.div
+                className="w-5 h-5 rounded-full border-2 border-black/40 border-t-black"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+              />
+              Redirection Stripe…
             </motion.div>
           ) : (
-            <motion.div key="pay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="flex items-center gap-2">
+            <motion.div
+              key="pay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-2"
+            >
               <Lock size={18} className="flex-shrink-0" />
-              Débloquer · {selectedPlan.price}
+              Payer · {selectedPlan.price}
               <ChevronRight size={18} className="flex-shrink-0" />
             </motion.div>
           )}
         </AnimatePresence>
       </motion.button>
 
-      {/* ── Garanties ── */}
       <motion.div variants={item} className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
         {[
-          'Satisfait ou remboursé',
+          'Paiement Stripe sécurisé',
           'Accès immédiat',
           plan === 'once' ? 'Sans abonnement' : 'Résiliation en 1 clic',
         ].map((g) => (
@@ -505,7 +470,6 @@ export default function PaymentScreen({ sessionId, userId, email, generationId, 
           </span>
         ))}
       </motion.div>
-
     </motion.div>
   )
 }

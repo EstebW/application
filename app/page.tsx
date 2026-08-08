@@ -38,6 +38,10 @@ import {
 } from '@/lib/session-storage'
 import { isValidUserHeightCm } from '@/lib/height'
 import { prefetchCelebrityImage } from '@/lib/celebrity-image'
+import {
+  clearCheckoutReturnContext,
+  readCheckoutReturnContext,
+} from '@/lib/checkout-return'
 
 // ── Deux funnels :
 // 1) Match : photo → analyse → teaser flouté → (compte) → paiement → révélation jumeau → scène → génération
@@ -386,6 +390,91 @@ export default function HomePage() {
     setStep(appMode === 'match' ? 'result' : 'customize')
   }, [appMode])
 
+  // Retour Stripe Checkout → confirmer le paiement et reprendre le funnel
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const checkout = params.get('checkout')
+    const checkoutSessionId = params.get('session_id')
+
+    if (checkout === 'cancel') {
+      const ctx = readCheckoutReturnContext()
+      if (ctx?.celebrity) setCelebrity(ctx.celebrity as CelebrityResult)
+      if (ctx?.photoPreview) setPhotoPreview(ctx.photoPreview)
+      if (ctx?.analysisId) setAnalysisId(ctx.analysisId)
+      if (ctx?.generationId) setGenerationId(ctx.generationId)
+      if (ctx?.creationMode) setCreationMode(ctx.creationMode)
+      if (ctx?.basePhoto) setBasePhoto(ctx.basePhoto)
+      if (typeof ctx?.userHeightCm === 'number') setUserHeightCm(ctx.userHeightCm)
+      if (ctx?.appMode === 'match' || ctx?.appMode === 'custom') setAppMode(ctx.appMode)
+      if (ctx?.celebrity) setStep('payment')
+      window.history.replaceState({}, '', '/')
+      return
+    }
+
+    if (checkout !== 'success' || !checkoutSessionId?.startsWith('cs_')) return
+
+    let cancelled = false
+
+    async function resumeAfterCheckout() {
+      try {
+        const res = await fetch(
+          `/api/stripe/confirm?session_id=${encodeURIComponent(checkoutSessionId!)}`
+        )
+        const data = (await res.json()) as {
+          creditsBalance?: number
+          sessionId?: string
+          error?: string
+        }
+        if (!res.ok) throw new Error(data.error || 'Confirmation paiement échouée')
+        if (cancelled) return
+
+        const ctx = readCheckoutReturnContext()
+        clearCheckoutReturnContext()
+
+        if (data.sessionId) {
+          setSessionId(data.sessionId)
+          setStoredSessionId(data.sessionId)
+        }
+        if (typeof data.creditsBalance === 'number') {
+          setCreditsBalance(data.creditsBalance)
+        }
+        setHasUnlocked(true)
+
+        if (ctx?.celebrity) {
+          setCelebrity(ctx.celebrity as CelebrityResult)
+        }
+        if (ctx?.photoPreview) setPhotoPreview(ctx.photoPreview)
+        if (ctx?.analysisId) setAnalysisId(ctx.analysisId)
+        if (ctx?.generationId) setGenerationId(ctx.generationId)
+        if (ctx?.creationMode) setCreationMode(ctx.creationMode)
+        if (ctx?.basePhoto) setBasePhoto(ctx.basePhoto)
+        if (typeof ctx?.userHeightCm === 'number') setUserHeightCm(ctx.userHeightCm)
+        if (ctx?.appMode === 'match' || ctx?.appMode === 'custom') {
+          setAppMode(ctx.appMode)
+        }
+
+        // Ne jamais afficher un step qui exige `celebrity` si le snapshot est absent
+        // (sinon écran blanc : le rendu est conditionné par `celebrity && …`).
+        const mode = ctx?.appMode ?? appMode
+        if (ctx?.celebrity && mode === 'match') {
+          setStep('result')
+        } else if (ctx?.celebrity && mode === 'custom') {
+          setStep('customize')
+        } else {
+          setStep('modeChoice')
+        }
+      } catch (err) {
+        console.error('[checkout return]', err)
+      } finally {
+        window.history.replaceState({}, '', '/')
+      }
+    }
+
+    resumeAfterCheckout()
+    return () => { cancelled = true }
+  }, [appMode])
+
   const handleInsufficientCredits = useCallback(() => {
     setStep('payment')
   }, [])
@@ -657,6 +746,16 @@ export default function HomePage() {
                 score={appMode === 'custom' ? undefined : celebrity.score}
                 creditsBalance={creditsBalance}
                 onSuccess={handlePaymentSuccess}
+                returnTo="home"
+                appMode={appMode}
+                checkoutContext={{
+                  celebrity,
+                  photoPreview,
+                  analysisId: analysisId || undefined,
+                  creationMode,
+                  basePhoto: basePhoto || undefined,
+                  userHeightCm,
+                }}
               />
             </motion.div>
           )}

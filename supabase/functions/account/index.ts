@@ -40,10 +40,34 @@ type SessionRow = {
   credits_balance?: number | null
   subscription_plan?: string | null
   subscription_expires_at?: string | null
+  stripe_customer_id?: string | null
   owned_at?: string | null
   height_cm?: number | null
   created_at?: string | null
   [key: string]: unknown
+}
+
+function formatCelebrityName(raw: string): string {
+  return raw
+    .trim()
+    .split(/\s+/)
+    .map((part) => {
+      const lower = part.toLowerCase()
+      if (['de', 'du', 'des', 'la', 'le', 'van', 'von', 'da', 'di'].includes(lower)) return lower
+      return lower.charAt(0).toUpperCase() + lower.slice(1)
+    })
+    .join(' ')
+    .replace(/^([a-z])/, (c) => c.toUpperCase())
+}
+
+function paymentLabel(plan: string | null | undefined, amount: number): string {
+  if (plan === 'weekly') return 'Abonnement hebdomadaire'
+  if (plan === 'monthly') return 'Abonnement mensuel'
+  if (plan === 'once') return 'Achat One Shot'
+  if (amount === 10) return 'Abonnement hebdomadaire'
+  if (amount === 40) return 'Abonnement mensuel'
+  if (amount === 1) return 'Achat One Shot'
+  return 'Achat de crédits'
 }
 
 function getErrorMessage(err: unknown): string {
@@ -218,7 +242,7 @@ Deno.serve(async (req: Request) => {
 
     let generationsQuery = db
       .from('generations')
-      .select('id, celebrity_name, unlocked, scene_summary, created_at, analysis_id, session_id, user_id')
+      .select('id, celebrity_name, unlocked, scene_summary, created_at, analysis_id, session_id, user_id, creation_mode')
       .order('created_at', { ascending: false })
       .limit(60)
 
@@ -235,7 +259,7 @@ Deno.serve(async (req: Request) => {
       generationsQuery,
       db
         .from('credit_transactions')
-        .select('id, amount, reason, created_at')
+        .select('id, amount, reason, created_at, reference_id')
         .in('session_id', sessionIds)
         .order('created_at', { ascending: false })
         .limit(20),
@@ -309,6 +333,72 @@ Deno.serve(async (req: Request) => {
       return true
     })
 
+    const rawTx = transactionsRes.error ? [] : (transactionsRes.data ?? [])
+    const paymentIds = rawTx
+      .filter((t) => t.reason === 'payment' && t.reference_id)
+      .map((t) => t.reference_id as string)
+    const generationIds = rawTx
+      .filter((t) => t.reason === 'generation' && t.reference_id)
+      .map((t) => t.reference_id as string)
+
+    const paymentPlanById = new Map<string, string | null>()
+    const generationNameById = new Map<string, string>()
+
+    if (paymentIds.length > 0) {
+      const { data: pays } = await db.from('payments').select('id, plan').in('id', paymentIds)
+      for (const p of pays ?? []) {
+        paymentPlanById.set(p.id as string, (p.plan as string | null) ?? null)
+      }
+    }
+
+    if (generationIds.length > 0) {
+      const { data: gens } = await db
+        .from('generations')
+        .select('id, celebrity_name')
+        .in('id', generationIds)
+      for (const g of gens ?? []) {
+        if (g.celebrity_name) {
+          generationNameById.set(g.id as string, formatCelebrityName(g.celebrity_name as string))
+        }
+      }
+    }
+
+    // Aussi index les générations déjà chargées (même sans reference match)
+    for (const g of generations) {
+      if (g.id && g.celebrity_name) {
+        generationNameById.set(g.id as string, formatCelebrityName(g.celebrity_name as string))
+      }
+    }
+
+    const transactions = rawTx.map((t) => {
+      let label = 'Mouvement'
+      if (t.reason === 'payment') {
+        label = paymentLabel(
+          t.reference_id ? paymentPlanById.get(t.reference_id as string) : null,
+          Number(t.amount) || 0
+        )
+      } else if (t.reason === 'generation') {
+        const name = t.reference_id
+          ? generationNameById.get(t.reference_id as string)
+          : undefined
+        label = name ? `Photo avec ${name}` : 'Photo générée'
+      } else if (t.reason === 'refund') {
+        label = 'Remboursement'
+      } else if (t.reason === 'bonus') {
+        label = 'Bonus'
+      } else {
+        label = String(t.reason)
+      }
+      return {
+        id: t.id,
+        amount: t.amount,
+        reason: t.reason,
+        created_at: t.created_at,
+        reference_id: t.reference_id ?? null,
+        label,
+      }
+    })
+
     return new Response(
       JSON.stringify({
         sessionId: primary.id,
@@ -317,12 +407,20 @@ Deno.serve(async (req: Request) => {
         creditsBalance,
         subscriptionPlan: primary.subscription_plan,
         subscriptionExpiresAt: primary.subscription_expires_at,
+        stripeCustomerId: (primary.stripe_customer_id as string | null | undefined) ?? null,
         // Prérempli le champ de taille du parcours « Choisis ta star ».
         // undefined tant que la colonne n'existe pas (migration non appliquée).
         heightCm: typeof primary.height_cm === 'number' ? primary.height_cm : null,
-        analyses: analyses.map(({ session_id: _s, user_id: _u, ...rest }) => rest),
-        generations: generations.map(({ session_id: _s, user_id: _u, ...rest }) => rest),
-        transactions: transactionsRes.error ? [] : (transactionsRes.data ?? []),
+        analyses: analyses.map(({ session_id: _s, user_id: _u, ...rest }) => ({
+          ...rest,
+          celebrity_name: formatCelebrityName(String(rest.celebrity_name ?? '')),
+        })),
+        generations: generations.map(({ session_id: _s, user_id: _u, ...rest }) => ({
+          ...rest,
+          celebrity_name: formatCelebrityName(String(rest.celebrity_name ?? '')),
+          creation_mode: (rest as { creation_mode?: string | null }).creation_mode ?? null,
+        })),
+        transactions,
       }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } }
     )

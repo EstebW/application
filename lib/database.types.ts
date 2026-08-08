@@ -18,6 +18,7 @@ export interface Database {
           owned_at: string | null
           /** Taille déclarée par l'utilisateur, en centimètres */
           height_cm: number | null
+          stripe_customer_id: string | null
         }
         Insert: {
           id?: string
@@ -32,6 +33,7 @@ export interface Database {
           subscription_expires_at?: string | null
           owned_at?: string | null
           height_cm?: number | null
+          stripe_customer_id?: string | null
         }
         Update: Partial<Database['public']['Tables']['sessions']['Insert']>
         Relationships: []
@@ -122,6 +124,10 @@ export interface Database {
           credits_granted: number | null
           status: 'pending' | 'completed' | 'failed'
           created_at: string
+          stripe_checkout_session_id: string | null
+          stripe_payment_intent_id: string | null
+          stripe_invoice_id: string | null
+          stripe_subscription_id: string | null
         }
         Insert: {
           id?: string
@@ -134,6 +140,10 @@ export interface Database {
           credits_granted?: number | null
           status?: 'pending' | 'completed' | 'failed'
           created_at?: string
+          stripe_checkout_session_id?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_invoice_id?: string | null
+          stripe_subscription_id?: string | null
         }
         Update: Partial<Database['public']['Tables']['payments']['Insert']>
         Relationships: []
