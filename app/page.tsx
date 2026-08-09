@@ -876,8 +876,6 @@ export default function HomePage() {
           <Link href="/legal/confidentialite" className="hover:text-[#606060]">Confidentialité</Link>
           <span>·</span>
           <Link href="/legal/remboursement" className="hover:text-[#606060]">Remboursement</Link>
-          <span>·</span>
-          <a href="mailto:contact@starfusion.online" className="hover:text-[#606060]">Support</a>
         </p>
       </footer>
     </div>

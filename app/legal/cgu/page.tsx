@@ -5,11 +5,7 @@ export default function CguPage() {
   return (
     <LegalLayout title="Conditions générales d’utilisation">
       <p className="text-[#808080] text-sm">
-        Dernière mise à jour : août 2026 · Éditeur : StarFusion (
-        <a href="mailto:contact@starfusion.online" className="text-[#D4AF37] hover:underline">
-          contact@starfusion.online
-        </a>
-        )
+        Dernière mise à jour : août 2026 · Éditeur : StarFusion
       </p>
 
       <h2 className="text-white font-bold text-base pt-2">1. Objet</h2>
@@ -52,13 +48,9 @@ export default function CguPage() {
         applicable.
       </p>
 
-      <h2 className="text-white font-bold text-base pt-2">7. Contact</h2>
+      <h2 className="text-white font-bold text-base pt-2">7. Documents liés</h2>
       <p>
-        Pour toute question :{' '}
-        <a href="mailto:contact@starfusion.online" className="text-[#D4AF37] hover:underline">
-          contact@starfusion.online
-        </a>
-        . Voir aussi nos pages{' '}
+        Voir aussi nos pages{' '}
         <Link href="/legal/confidentialite" className="text-[#D4AF37] hover:underline">
           confidentialité
         </Link>{' '}

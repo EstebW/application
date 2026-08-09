@@ -5,10 +5,7 @@ export default function ConfidentialitePage() {
   return (
     <LegalLayout title="Politique de confidentialité">
       <p className="text-[#808080] text-sm">
-        Dernière mise à jour : août 2026 · Contact :{' '}
-        <a href="mailto:contact@starfusion.online" className="text-[#D4AF37] hover:underline">
-          contact@starfusion.online
-        </a>
+        Dernière mise à jour : août 2026
       </p>
 
       <h2 className="text-white font-bold text-base pt-2">1. Données collectées</h2>
@@ -42,11 +39,8 @@ export default function ConfidentialitePage() {
       <h2 className="text-white font-bold text-base pt-2">5. Vos droits (RGPD)</h2>
       <p>
         Vous pouvez demander l’accès, la rectification, la suppression ou la portabilité de
-        vos données, et vous opposer à certains traitements, en écrivant à{' '}
-        <a href="mailto:contact@starfusion.online" className="text-[#D4AF37] hover:underline">
-          contact@starfusion.online
-        </a>
-        .
+        vos données, et vous opposer à certains traitements, en contactant l’éditeur via les
+        coordonnées indiquées sur le site ou votre espace compte.
       </p>
 
       <h2 className="text-white font-bold text-base pt-2">6. Documents liés</h2>

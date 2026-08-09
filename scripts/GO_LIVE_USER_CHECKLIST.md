@@ -31,14 +31,10 @@ Ou Dashboard : redéployer au minimum `generate`, `account`, `register`, `paymen
 - Customer Portal activé : https://dashboard.stripe.com/settings/billing/portal
 - Webhook live qui reçoit bien les events
 
-## 5. Support email
-
-Les pages légales pointent vers `contact@starfusion.online` — crée cette boîte (ou change l’adresse dans les pages `/legal/*`).
-
-## 6. Relire / adapter les textes légaux
+## 5. Relire / adapter les textes légaux
 
 CGU, confidentialité, remboursement sont des bases — fais-les valider si besoin (avocat).
 
-## 7. Push / redeploy Vercel
+## 6. Redeploy Vercel
 
-Commit + push du code, puis vérifier un parcours payant test (petit montant) en live.
+Après push, vérifier que la prod est à jour.
