@@ -15,23 +15,12 @@ interface FinalResultProps {
 
 export default function FinalResult({ celebrity, generatedImage, onReset, onPay }: FinalResultProps) {
   const [showParticles, setShowParticles] = useState(true)
-  const [timeLeft, setTimeLeft] = useState(600)
   const { name } = celebrity
 
   useEffect(() => {
     const timer = setTimeout(() => setShowParticles(false), 4000)
     return () => clearTimeout(timer)
   }, [])
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTimeLeft((t) => (t > 0 ? t - 1 : 0))
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const minutes = Math.floor(timeLeft / 60)
-  const seconds = timeLeft % 60
 
   const containerVariants = {
     hidden: {},
@@ -214,31 +203,17 @@ export default function FinalResult({ celebrity, generatedImage, onReset, onPay 
                 Débloque ta photo avec {name}
               </h3>
               <p className="text-[#A0A0A0] text-sm">
-                Sans watermark · télécharge-la et partage-la en un clic
+                Version HD · télécharge-la et partage-la en un clic
               </p>
             </div>
 
-            {/* 2. Prix + urgence intégrée */}
+            {/* 2. Accès payant (prix réels sur l’écran Stripe) */}
             <div className="text-center space-y-1">
-              <div className="flex items-baseline justify-center gap-3">
-                <span className="text-[#555] text-base line-through">4,99€</span>
-                <span
-                  className="text-4xl font-black"
-                  style={{
-                    background: 'linear-gradient(135deg, #D4AF37, #F0D060)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    backgroundClip: 'text',
-                  }}
-                >
-                  1,99€
-                </span>
-              </div>
+              <p className="text-[#D4AF37] text-sm font-semibold">
+                Débloque ta photo avec un pack de crédits
+              </p>
               <p className="text-xs text-[#A0A0A0]">
-                Offre limitée · expire dans{' '}
-                <span className="text-[#D4AF37] font-semibold tabular-nums">
-                  {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
-                </span>
+                Paiement sécurisé via Stripe
               </p>
             </div>
 

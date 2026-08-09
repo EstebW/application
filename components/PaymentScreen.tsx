@@ -102,7 +102,7 @@ const PLANS: Plan[] = [
       '40 photos IA avec tes stars',
       'Renouvellement automatique',
       'Version HD · Sans watermark',
-      'Priorité de génération',
+      'Crédits renouvelés chaque période',
     ],
   },
 ]
@@ -158,7 +158,7 @@ export default function PaymentScreen({
 
       const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await (await import('@/lib/client-auth-headers')).getClientAuthHeaders(),
         body: JSON.stringify({
           plan,
           sessionId,

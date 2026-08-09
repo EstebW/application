@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getRequestAuthUser } from '@/lib/auth-request'
 import { createServerClient } from '@/lib/supabase'
 import {
   getStripe,
@@ -14,30 +15,30 @@ export const runtime = 'nodejs'
 export type { StripeBillingSummary }
 
 async function resolveStripeCustomerId(
-  sessionId?: string | null,
-  userId?: string | null
+  userId: string,
+  sessionId?: string | null
 ): Promise<string | null> {
   const db = createServerClient()
 
-  if (userId) {
-    const { data } = await db
-      .from('sessions')
-      .select('stripe_customer_id')
-      .eq('user_id', userId)
-      .not('stripe_customer_id', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (data?.stripe_customer_id) return data.stripe_customer_id
-  }
+  const { data } = await db
+    .from('sessions')
+    .select('stripe_customer_id')
+    .eq('user_id', userId)
+    .not('stripe_customer_id', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (data?.stripe_customer_id) return data.stripe_customer_id
 
   if (sessionId) {
-    const { data } = await db
+    const { data: sess } = await db
       .from('sessions')
-      .select('stripe_customer_id')
+      .select('stripe_customer_id, user_id')
       .eq('id', sessionId)
       .maybeSingle()
-    if (data?.stripe_customer_id) return data.stripe_customer_id
+    if (sess?.user_id === userId && sess.stripe_customer_id) {
+      return sess.stripe_customer_id
+    }
   }
 
   return null
@@ -46,15 +47,16 @@ async function resolveStripeCustomerId(
 /** Résumé abonnement Stripe live (pas un faux état local). */
 export async function GET(req: Request) {
   try {
-    const url = new URL(req.url)
-    const sessionId = url.searchParams.get('sessionId')
-    const userId = url.searchParams.get('userId')
-
-    if (!sessionId && !userId) {
-      return NextResponse.json({ error: 'sessionId ou userId requis' }, { status: 400 })
+    const authUser = await getRequestAuthUser(req)
+    if (!authUser?.id) {
+      return NextResponse.json({ error: 'Connexion requise' }, { status: 401 })
     }
 
-    const customerId = await resolveStripeCustomerId(sessionId, userId)
+    const url = new URL(req.url)
+    const sessionId = url.searchParams.get('sessionId')
+    const userId = authUser.id
+
+    const customerId = await resolveStripeCustomerId(userId, sessionId)
     if (!customerId) {
       const empty: StripeBillingSummary = {
         hasStripeCustomer: false,

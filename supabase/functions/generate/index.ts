@@ -55,11 +55,6 @@ async function getAuthUser(req: Request): Promise<User | null> {
   }
 }
 
-function bindUserId(authUser: User | null, bodyUserId?: string): string | undefined {
-  if (authUser?.id) return authUser.id
-  return bodyUserId?.trim() || undefined
-}
-
 const KIE_API_BASE = 'https://api.kie.ai'
 const KIE_FILE_API_BASE = 'https://kieai.redpandaai.co'
 const POLL_INTERVAL_MS = 3000
@@ -958,7 +953,7 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   ].filter(Boolean).join('\n')
 }
 
-/** « Ajouter la star à ma photo » — la photo importée est la base immuable. */
+/** « Ajouter la star à ma photo » — édition minimale, pixels source verrouillés. */
 function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   const { celebrityName, celebrityDomain, interaction, customPrompt, hasCelebrityReferenceImage } = ctx
   const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
@@ -969,111 +964,98 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 300) : ''
 
   return [
-    'INVISIBLE INTEGRATION OF A CELEBRITY INTO AN EXISTING PHOTOGRAPH.',
+    'STRICT INPAINT / COMPOSITE EDIT — NOT A NEW PHOTO GENERATION.',
     '',
-    'Edit the uploaded photograph instead of generating an entirely new image.',
+    'PRIORITY ORDER (highest → lowest):',
+    '1) The uploaded photograph (image_input[0]) is the SINGLE source of truth.',
+    '2) Preserve the original pixels of image_input[0] as much as technically possible.',
+    '3) Do NOT regenerate the user\'s face.',
+    '4) Do NOT modify the user\'s facial features, hairstyle, glasses, expression, body, or clothing.',
+    '5) Do NOT reconstruct the background.',
+    '6) Do NOT move, delete, replace, or duplicate existing objects.',
+    '7) Do NOT invent extra furniture or scene elements (no second bench, no new chairs, props, walls, trees, cars, etc.).',
+    `8) Add ONLY ${celeb} and ONLY the minimum changes required for their integration (contact shadows, cast shadows, soft occlusions, local grain match).`,
+    `9) Adapt ${celeb} to the original photo\'s perspective, scale, light, shadows, colours, noise, sharpness, and quality.`,
+    `10) ${celeb} must adapt to the original photograph — NEVER the reverse. Never restyle the photo to fit the celebrity.`,
     '',
-    'Treat the uploaded photograph as the immutable visual base of the final result.',
+    'LOCKED SCENE RULE (NON-NEGOTIABLE):',
+    'Treat all existing people, objects, furniture, background elements and scene geometry in the source photograph as locked. Do not regenerate, duplicate, replace, move or reinterpret them. Only introduce the selected celebrity and the minimum necessary shadows, reflections or occlusions required for realistic integration.',
     '',
-    `The goal is to add ${celeb}${domain ? ` (${domain})` : ''} naturally into the existing photograph, so that it looks as if they had really been present at the moment the original photo was taken.`,
+    'LOCKED USER RULE (NON-NEGOTIABLE):',
+    'Treat the user\'s existing face and body as locked source content. Preserve their identity and visible pixels as much as technically possible. Do not reconstruct, beautify, smooth, reshape or reinterpret the user\'s face.',
+    '',
+    'TASK:',
+    `Minimally edit image_input[0] to insert ${celeb}${domain ? ` (${domain})` : ''} into already-empty space, as if they were present when the original photo was taken.`,
+    'This is a surgical composite — not a redraw, not a restyle, not a scene rebuild.',
     '',
     'image_input ORDER:',
-    '- image_input[0] = THE BASE PHOTOGRAPH (immutable). It defines EVERYTHING: camera, framing, perspective, eye level, lighting and image quality. It contains the user.',
+    '- image_input[0] = LOCKED BASE PHOTOGRAPH. Keep its pixels for the user, background, objects, furniture, framing, crop, perspective, lighting and camera quality.',
     ...(dual
       ? [
-          `- image_input[1] = FACIAL IDENTITY REFERENCE ONLY for ${celeb}.`,
-          '- CRITICAL: image_input[1] is NOT a cutout to paste. Never copy its framing, crop, head size, head angle, body pose, clothing scale, background, lighting or image quality. Take the facial identity from it and NOTHING else.',
-          `- If image_input[1] shows only a head or upper body, generate the rest of ${celeb}'s body naturally, consistent with their real build and with the framing of image_input[0].`,
-          `- ${celeb}'s facial identity must match image_input[1] exactly — same features, same hair. Do not invent a generic celebrity face and do not blend their face with the user's.`,
+          `- image_input[1] = FACE/HAIR IDENTITY REFERENCE ONLY for ${celeb}.`,
+          '- CRITICAL: image_input[1] is NOT a cutout to paste and NOT a scene reference. Ignore its background, clothing, pose, crop, lighting and image quality.',
+          `- If image_input[1] shows only a head/upper body, complete ${celeb}'s body coherently for insertion into EMPTY space in image_input[0] — without altering any existing object or the user.`,
+          `- ${celeb}'s facial identity must match image_input[1]. Do not invent a generic celebrity face and do not blend with the user.`,
         ]
       : []),
     '',
-    'DO NOT ASSUME THIS IS A GROUP PHOTO.',
+    'USER — PIXEL LOCK:',
+    '- Keep the user\'s face, skin texture, hair, glasses, expression, body, pose, hands, clothing and accessories unchanged from image_input[0].',
+    '- Do not retouch, beautify, sharpen, smooth, age-shift, or slightly "improve" the user.',
+    '- Do not borrow limbs from the user for the celebrity.',
     '',
-    'Do not change the type of photo, the setting, the composition, the mood or the intent of the original photograph.',
+    'BACKGROUND & OBJECTS — PIXEL LOCK:',
+    '- Keep the exact same background: same place, same geometry, same furniture count and placement.',
+    '- If one bench / chair / table / car / tree / wall already exists, leave THAT one as-is. Never add a second copy.',
+    '- Do not fill, extend, repaint, or "clean up" the background.',
+    '- Do not change framing, crop, camera angle, horizon, or lens look.',
     '',
-    `Adapt ${celeb} to the existing image, whether it is a selfie, a portrait, a full-body shot, an indoor photo, an outdoor photo, an amateur snapshot, a party, a car interior, a street, a beach, a restaurant, a concert or any other real-life situation.`,
-    '',
-    'PRESERVE THE ORIGINAL PHOTOGRAPH AND THE PERSON ALREADY IN IT AS MUCH AS POSSIBLE.',
-    '',
-    'Do not regenerate, replace, beautify, redraw, smooth, sharpen or reinterpret the user.',
-    '',
-    'Preserve exactly: their identity; their face; their facial proportions; their expression; their skin texture; their hairstyle; their body; their posture; their hands; their clothing; their accessories.',
-    '',
-    'Preserve the original photographic characteristics as well: the background; the objects; the framing; the crop; the camera angle; the perspective; the horizon line; the apparent focal length; the resolution; the lighting; the shadows; the reflections; the colours; the sharpness; the blur; the depth of field; the grain; the digital noise; the compression artefacts; the visual signature of the camera or smartphone that took the photo.',
-    '',
-    `Only add ${celeb} into a physically believable available area of the photograph.`,
-    '',
-    `${celeb}'s position, posture, body orientation, expression, interaction and visibility must adapt naturally to the existing scene.`,
-    '',
-    'Do not impose a posture or an interaction that is incompatible with the original photograph.',
-    '',
-    `${celeb} must match the source photo precisely in terms of: perspective; camera height; body scale; distance from the camera; light direction; light intensity; shadow softness; exposure; white balance; colour temperature; colour cast; contrast; saturation; dynamic range; sharpness; focus softness; motion blur; depth of field; skin detail level; sensor noise; grain; compression; lens distortion; overall image quality.`,
-    '',
-    `${celeb} must NEVER appear sharper, cleaner, brighter, more detailed, more saturated, more contrasted or more professionally photographed than the user or the original environment.`,
-    '',
-    'If the source photograph is dark, soft, slightly blurry, grainy, noisy, compressed, desaturated, imperfectly exposed or of average quality, reproduce those exact same imperfections on the added celebrity.',
-    '',
-    `${celeb} must feel physically present in the environment. Use realistically: ground placement; perspective; body scale; contact shadows; cast shadows; light bounced from the environment; contour softness; overlaps; natural occlusions; spacing between people and objects; interaction with nearby objects; interaction with the user when appropriate.`,
-    '',
-    `${celeb} must not look pasted, floating, cut out, superimposed or photographed with a different camera.`,
-    '',
-    'GEOMETRY AND SCALE — THIS IS THE #1 FAILURE POINT, TREAT IT AS CRITICAL:',
-    `- Render ${celeb} as a COMPLETE, coherent human being physically present in the scene. Never a floating head, never a head-and-shoulders cutout, never a sticker pasted on top of the photo.`,
-    '- Their head-to-body proportions must be anatomically correct. A head without a matching body, or a head too large for its body, is an automatic failure.',
-    '- Size their head like a real human head at their actual distance from the camera: compare it to the user\'s head and scale it by depth — slightly smaller when further away, never bigger unless they are clearly closer to the lens.',
-    '- Use the SAME eye level, horizon line, camera height, lens focal length and perspective vanishing lines as image_input[0]. Their gaze and head tilt must be consistent with that camera position.',
-    '- Ground them physically: plausible standing or seated position, weight supported by the floor, feet visible or naturally occluded by the user, furniture or the frame border.',
-    '- If image_input[0] is a close-range selfie, place them at arm\'s length beside or slightly behind the user, sharing the same wide-angle distortion, partially occluded by the user or the frame — exactly as it would happen in real life.',
-    '- If the frame cuts them off, it must read as natural photographic framing: a continuous body cut by the image border, never a detached silhouette floating inside the frame.',
-    '- Blend their edges into the photograph: no hard cutout outline, no halo, no fringe. Their contours must carry the same softness, motion blur, grain and JPEG compression as the surrounding pixels.',
-    `- Do not reuse or re-attribute the user's limbs. Any arm or hand belonging to ${celeb} must be anatomically connected to their own body. Never add a limb without a body.`,
-    '- Never duplicate people, faces, hands or limbs.',
+    `CELEBRITY INSERTION — ONLY ALLOWED CHANGE:`,
+    `- Place ${celeb} only in free space that already exists in image_input[0] (beside / behind / at frame edge), without pushing, moving, or covering locked content when avoidable.`,
+    `- ${celeb} must match image_input[0] for: perspective, eye level, body scale, light direction/intensity, shadow softness, exposure, white balance, colour cast, contrast, sharpness, blur, depth of field, grain, noise, compression, lens distortion.`,
+    `- ${celeb} must NEVER look sharper, cleaner, brighter, or more professional than the original photo.`,
+    `- Allowed local effects ONLY on/near ${celeb}: contact shadow, cast shadow, soft occlusion, grain/noise match. Nothing else.`,
+    `- ${celeb} must be a complete, anatomically coherent person (not a floating head / sticker), sized to real human scale at their depth.`,
+    `- Prefer a slightly imperfect placement over ANY change to the locked user or locked scene.`,
     '',
     heightConsistencyBlock(ctx).join('\n'),
     '',
-    'DO NOT reconstruct the whole scene.',
-    'DO NOT globally enhance or upgrade the photograph.',
-    'DO NOT add cinematic lighting.',
-    'DO NOT add studio lighting.',
-    'DO NOT create fake HDR.',
-    'DO NOT create fake background blur.',
-    'DO NOT create shiny, plastic or artificial skin.',
-    'DO NOT turn the image into a promotional, advertising, editorial, cinematic or poster photograph.',
-    'DO NOT crop or reframe the image unless absolutely necessary.',
+    'HARD BANS:',
+    '- Do NOT regenerate or reinterpret the scene.',
+    '- Do NOT duplicate furniture, props, people, faces, hands, or limbs.',
+    '- Do NOT invent new décor to "seat" or support the celebrity.',
+    '- Do NOT globally enhance, relight, HDR, blur, or cinematic-grade the photo.',
+    '- Do NOT crop or reframe.',
+    '- Do NOT turn the result into a promo / editorial / poster image.',
     '',
-    `Make only the changes strictly necessary to integrate ${celeb} naturally into the original photograph.`,
-    '',
-    'AVOID: pasted cutout look, sticker effect, collage, photomontage, floating head or torso, disembodied head, oversized or undersized head, wrong head-to-body ratio, mismatched perspective, mismatched eye level, subject sharper than the photo, hard edges, halo outline, distorted anatomy, incoherent shadows, duplicated objects, altered faces, artificial skin and any obvious AI-generated appearance.',
+    'AVOID: redrawn user face, rebuilt background, second bench/chair/object, pasted cutout, floating head, halo edges, mismatched sharpness, altered framing, AI-looking skin.',
     '',
     ...(interactionPrompt
       ? [
-          'OPTIONAL INTERACTION (only if it fits the existing photo without moving or reshaping the user):',
+          'OPTIONAL INTERACTION (lowest priority — drop immediately if it would touch locked content):',
           `- Preferred: ${sanitizeSceneText(interactionPrompt)}.`,
-          '- If this interaction would require changing the user\'s pose, body, framing or background, IGNORE it and simply place the celebrity in the free space.',
+          '- If this would move/reshape the user, change the background, or require new/moved furniture, IGNORE it and only place the celebrity in free space with no interaction.',
           '',
         ]
       : []),
     ...(userHint
       ? [
-          'OPTIONAL USER NOTE (lowest priority — never overrides the rules above):',
+          'OPTIONAL USER NOTE (lowest priority — never overrides locks above):',
           userHint,
-          '- Ignore any part of this note that would modify the user, the background or the framing.',
+          '- Ignore any part that would modify the user, background, objects, furniture, or framing.',
           '',
         ]
       : []),
     'FINAL GOAL:',
-    'The edited result must look like ONE single real photograph taken at the same moment with the same camera.',
-    'Someone looking at the image must not be able to tell which person was added after the shot.',
+    'Same photograph as image_input[0], with one added person only. A stranger must believe the celebrity was in the original shot — and must still see the original scene pixels unchanged everywhere else.',
     '',
     'FINAL MANDATORY CHECK:',
-    '1) Is the user pixel-identical to image_input[0] (face, pose, clothes, expression)? If not, redo without touching them.',
-    '2) Is the background the ORIGINAL background, not a recreated one? If not, redo.',
-    `3) Is ${celeb} a COMPLETE person with a correctly proportioned body, head size, eye level and perspective consistent with the user? If not, fix the geometry before anything else.`,
-    `4) Is ${celeb} exactly as soft, grainy, noisy and imperfect as the rest of the photograph — never cleaner or sharper? If not, degrade them to match.`,
-    '5) Does any part look pasted — hard edges, halo, floating body, sticker, mismatched sharpness? If yes, re-integrate with matching grain, blur, shadows and depth of field.',
-    '6) Could a stranger tell which person was added? If yes, the edit has failed.',
-    '7) Preserving the original photo always wins over a nicer composition.',
+    '1) User face/body/clothes identical to image_input[0]? If not → FAILED.',
+    '2) Background/objects/furniture identical (no duplicates, no inventions)? If not → FAILED.',
+    `3) Only real addition is ${celeb} + minimal shadows/occlusions? If not → FAILED.`,
+    `4) Does ${celeb} match the photo\'s light, grain, sharpness and perspective? If not, degrade/adjust ${celeb} only — never the base photo.`,
+    '5) Could you still recognise the original photo pixel-for-pixel outside the celebrity region? If not → FAILED.',
+    '6) Preserving the original photo ALWAYS wins over a nicer or more complete composition.',
   ].filter((line) => line !== '').join('\n')
 }
 
@@ -1291,6 +1273,13 @@ Deno.serve(async (req: Request) => {
     if (!kieKey) throw new Error('KIE_API_KEY non configurée dans les secrets Supabase')
 
     const authUser = await getAuthUser(req)
+    if (!authUser?.id) {
+      return new Response(
+        JSON.stringify({ error: 'Connexion requise pour générer une photo', code: 'AUTH_REQUIRED' }),
+        { status: 401, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const body = await req.json() as {
       imageBase64: string
       celebrityName: string
@@ -1327,8 +1316,9 @@ Deno.serve(async (req: Request) => {
       sessionId,
       analysisId,
     } = body
-    const userId = bindUserId(authUser, body.userId)
-    const email = authUser?.email ?? body.email
+    // JWT uniquement — jamais body.userId
+    const userId = authUser.id
+    const email = authUser.email ?? undefined
 
     if (!imageBase64 || !celebrityName) throw new Error('imageBase64 et celebrityName requis')
 
@@ -1412,33 +1402,86 @@ Deno.serve(async (req: Request) => {
       })
     }
 
-    // Bypass crédits : uniquement si le JWT est valide ET le rôle DB = super_admin.
-    // Jamais depuis body.userId / body.role / email client.
-    const appRole = await resolveAppRole(db, authUser?.id)
+    // Bypass crédits : uniquement JWT + rôle DB super_admin.
+    const appRole = await resolveAppRole(db, authUser.id)
     const unlimitedAccess = hasUnlimitedAccess(appRole)
 
-    const billingSession = (sessionId || userId || email?.trim())
-      ? await resolveBillingSession(db, { sessionId, userId, email })
-      : null
-    const billingSessionId = billingSession?.id ?? sessionId
+    const billingSession = await resolveBillingSession(db, { sessionId, userId, email })
+    const billingSessionId = billingSession?.id ?? null
 
-    if (billingSessionId && !unlimitedAccess) {
-      const balance = billingSession?.credits_balance ?? 0
-      if (balance < GENERATION_CREDIT_COST) {
-        return new Response(
-          JSON.stringify({
-            error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
-            code: 'APP_CREDITS_INSUFFICIENT',
-          }),
-          { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
-        )
+    if (!billingSessionId) {
+      return new Response(
+        JSON.stringify({
+          error: 'Session de facturation introuvable. Reconnecte-toi puis réessaie.',
+          code: 'APP_SESSION_REQUIRED',
+        }),
+        { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    let creditsBalance: number | undefined = billingSession?.credits_balance ?? undefined
+    let creditReserved = false
+
+    if (!unlimitedAccess) {
+      const { data: consumeRaw, error: consumeErr } = await db.rpc('consume_generation_credit', {
+        p_session_id: billingSessionId,
+        p_amount: GENERATION_CREDIT_COST,
+      })
+      const consume = (consumeRaw ?? null) as { ok?: boolean; new_balance?: number } | null
+      if (consumeErr || !consume?.ok) {
+        // Fallback si la RPC n'est pas encore déployée : check classique (moins sûr)
+        if (consumeErr) {
+          console.warn('[generate] consume RPC unavailable, fallback check:', consumeErr.message)
+          const balance = billingSession?.credits_balance ?? 0
+          if (balance < GENERATION_CREDIT_COST) {
+            return new Response(
+              JSON.stringify({
+                error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
+                code: 'APP_CREDITS_INSUFFICIENT',
+              }),
+              { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
+            )
+          }
+          const newBalance = balance - GENERATION_CREDIT_COST
+          const { error: updErr } = await db
+            .from('sessions')
+            .update({ credits_balance: newBalance })
+            .eq('id', billingSessionId)
+            .gte('credits_balance', GENERATION_CREDIT_COST)
+          if (updErr) {
+            return new Response(
+              JSON.stringify({
+                error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
+                code: 'APP_CREDITS_INSUFFICIENT',
+              }),
+              { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
+            )
+          }
+          await db.from('credit_transactions').insert({
+            session_id: billingSessionId,
+            amount: -GENERATION_CREDIT_COST,
+            reason: 'generation',
+            reference_id: null,
+          })
+          creditsBalance = newBalance
+          creditReserved = true
+        } else {
+          return new Response(
+            JSON.stringify({
+              error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
+              code: 'APP_CREDITS_INSUFFICIENT',
+            }),
+            { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
+          )
+        }
+      } else {
+        creditsBalance = typeof consume.new_balance === 'number' ? consume.new_balance : undefined
+        creditReserved = true
       }
     }
 
-    // Mémoriser la taille pour préremplir les prochaines générations.
-    // Best-effort isolé : la colonne arrive par migration et son absence ne
-    // doit jamais empêcher une génération déjà payée.
-    if (billingSessionId && userHeightCm) {
+    // Mémoriser la taille — best-effort.
+    if (userHeightCm) {
       try {
         await db.from('sessions').update({ height_cm: userHeightCm }).eq('id', billingSessionId)
       } catch (err) {
@@ -1446,79 +1489,80 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const imageUrl = await resolveReferenceImageUrl(imageBase64, kieKey)
-    const imageUrls = [imageUrl]
-    if (celebrityImageBase64) {
-      imageUrls.push(await resolveReferenceImageUrl(celebrityImageBase64, kieKey))
-    }
-    const taskId = await createTask(imageUrls, generationContext, kieKey)
-    const resultUrl = await pollTask(taskId, kieKey)
+    let generatedBase64: string
+    try {
+      const imageUrl = await resolveReferenceImageUrl(imageBase64, kieKey)
+      const imageUrls = [imageUrl]
+      if (celebrityImageBase64) {
+        imageUrls.push(await resolveReferenceImageUrl(celebrityImageBase64, kieKey))
+      }
+      const taskId = await createTask(imageUrls, generationContext, kieKey)
+      const resultUrl = await pollTask(taskId, kieKey)
 
-    const imgRes = await fetch(resultUrl)
-    const imgBuf = await imgRes.arrayBuffer()
-    const contentType = imgRes.headers.get('content-type') ?? 'image/jpeg'
-    const b64 = arrayBufferToBase64(imgBuf)
-    const generatedBase64 = `data:${contentType};base64,${b64}`
+      const imgRes = await fetch(resultUrl)
+      const imgBuf = await imgRes.arrayBuffer()
+      const contentType = imgRes.headers.get('content-type') ?? 'image/jpeg'
+      const b64 = arrayBufferToBase64(imgBuf)
+      generatedBase64 = `data:${contentType};base64,${b64}`
+    } catch (genErr) {
+      // Rembourse le crédit réservé si la génération IA échoue
+      if (creditReserved && billingSessionId) {
+        try {
+          const { data: refundRaw } = await db.rpc('refund_generation_credit', {
+            p_session_id: billingSessionId,
+            p_amount: GENERATION_CREDIT_COST,
+          })
+          const refund = refundRaw as { ok?: boolean; new_balance?: number } | null
+          if (refund?.ok && typeof refund.new_balance === 'number') {
+            creditsBalance = refund.new_balance
+          } else {
+            const { data: sess } = await db
+              .from('sessions')
+              .select('credits_balance')
+              .eq('id', billingSessionId)
+              .maybeSingle()
+            const bal = (sess?.credits_balance ?? 0) + GENERATION_CREDIT_COST
+            await db.from('sessions').update({ credits_balance: bal }).eq('id', billingSessionId)
+            await db.from('credit_transactions').insert({
+              session_id: billingSessionId,
+              amount: GENERATION_CREDIT_COST,
+              reason: 'refund',
+              reference_id: null,
+            })
+            creditsBalance = bal
+          }
+        } catch (refundErr) {
+          console.warn('[generate] credit refund failed:', refundErr)
+        }
+      }
+      throw genErr
+    }
 
     let generationId: string | undefined
-    let creditsBalance: number | undefined
 
-    if (billingSessionId) {
-      try {
-        const { data: session } = await db
-          .from('sessions')
-          .select('credits_balance')
-          .eq('id', billingSessionId)
-          .single()
-
-        const currentBalance = session?.credits_balance ?? 0
-        // Super Admin : pas de débit ni de mouvement crédit -1
-        const newBalance = unlimitedAccess
-          ? currentBalance
-          : currentBalance - GENERATION_CREDIT_COST
-
-        const generationRow = {
-          session_id: billingSessionId,
-          // "" n'est pas un UUID Postgres valide — même piège que payment/index.ts.
-          analysis_id: analysisId?.trim() ? analysisId.trim() : null,
-          celebrity_name: celebrityName,
-          unlocked: true,
-          scene_summary: sceneSummary || null,
-          ...(userId ? { user_id: userId } : {}),
-        }
-
-        let inserted = await db
-          .from('generations')
-          .insert({ ...generationRow, creation_mode: creationMode })
-          .select('id')
-          .single()
-
-        // La colonne creation_mode arrive par migration : sans elle, on insère quand
-        // même la génération pour ne pas casser le débit de crédits.
-        if (inserted.error) {
-          inserted = await db.from('generations').insert(generationRow).select('id').single()
-        }
-
-        generationId = inserted.data?.id
-
-        if (!unlimitedAccess) {
-          await db
-            .from('sessions')
-            .update({ credits_balance: newBalance })
-            .eq('id', billingSessionId)
-
-          await db.from('credit_transactions').insert({
-            session_id: billingSessionId,
-            amount: -GENERATION_CREDIT_COST,
-            reason: 'generation',
-            reference_id: generationId ?? null,
-          })
-        }
-
-        creditsBalance = newBalance
-      } catch (dbErr) {
-        console.warn('[generate] DB update failed:', dbErr)
+    try {
+      const generationRow = {
+        session_id: billingSessionId,
+        analysis_id: analysisId?.trim() ? analysisId.trim() : null,
+        celebrity_name: celebrityName,
+        unlocked: true,
+        scene_summary: sceneSummary || null,
+        user_id: userId,
       }
+
+      let inserted = await db
+        .from('generations')
+        .insert({ ...generationRow, creation_mode: creationMode })
+        .select('id')
+        .single()
+
+      if (inserted.error) {
+        inserted = await db.from('generations').insert(generationRow).select('id').single()
+      }
+
+      generationId = inserted.data?.id
+    } catch (dbErr) {
+      console.warn('[generate] generation insert failed:', dbErr)
     }
 
     return new Response(

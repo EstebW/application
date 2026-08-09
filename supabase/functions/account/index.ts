@@ -55,11 +55,6 @@ async function getAuthUser(req: Request): Promise<User | null> {
   }
 }
 
-function bindUserId(authUser: User | null, bodyUserId?: string): string | undefined {
-  if (authUser?.id) return authUser.id
-  return bodyUserId?.trim() || undefined
-}
-
 type SessionRow = {
   id: string
   email?: string | null
@@ -236,17 +231,24 @@ Deno.serve(async (req: Request) => {
       userId?: string
     }
 
-    const userId = bindUserId(authUser, body.userId)
-    const email = authUser?.email ?? body.email
-    // Si connecté : ignorer le sessionId navigateur (évite un historique étranger)
-    const sessionId = userId ? undefined : body.sessionId
-
-    if (!sessionId && !email?.trim() && !userId) {
-      throw new Error('sessionId, userId ou email requis')
+    // Anti-IDOR : un userId/email dans le body sans JWT valide est refusé.
+    if ((body.userId || body.email) && !authUser?.id) {
+      return new Response(
+        JSON.stringify({ error: 'Connexion requise' }),
+        { status: 401, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
     }
 
-    if (!userId && !sessionId) {
-      throw new Error('Connexion requise')
+    // Compte auth : uniquement l’id JWT. Anonyme : sessionId seul.
+    const userId = authUser?.id
+    const email = authUser?.email ?? undefined
+    const sessionId = userId ? undefined : body.sessionId?.trim()
+
+    if (!sessionId && !userId) {
+      return new Response(
+        JSON.stringify({ error: 'sessionId ou connexion requis' }),
+        { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
     }
 
     const db = createClient(

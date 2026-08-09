@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getRequestAuthUser } from '@/lib/auth-request'
 import { createServerClient } from '@/lib/supabase'
 import { isPlanId, type PlanId } from '@/lib/plans'
 import {
@@ -23,21 +24,19 @@ type Body = {
 
 export async function POST(req: Request) {
   try {
+    const authUser = await getRequestAuthUser(req)
+    if (!authUser?.id) {
+      return NextResponse.json({ error: 'Connexion requise' }, { status: 401 })
+    }
+
     const body = (await req.json()) as Body
     const plan: PlanId = isPlanId(body.plan) ? body.plan : 'once'
     const priceId = getStripePriceId(plan)
-    const email = body.email?.trim().toLowerCase() || undefined
+    const userId = authUser.id
+    const email = (authUser.email ?? body.email)?.trim().toLowerCase() || undefined
     const sessionId = body.sessionId?.trim() || undefined
-    const userId = body.userId?.trim() || undefined
     const generationId = body.generationId?.trim() || undefined
     const returnTo = body.returnTo === 'dashboard' ? 'dashboard' : 'home'
-
-    if (!sessionId && !userId && !email) {
-      return NextResponse.json(
-        { error: 'sessionId, userId ou email requis' },
-        { status: 400 }
-      )
-    }
 
     const db = createServerClient()
     const billingSessionId = await resolveBillingSessionId(db, { sessionId, userId, email })

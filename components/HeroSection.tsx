@@ -225,7 +225,7 @@ export default function HeroSection({ onPhotoSelected }: HeroSectionProps) {
           ))}
         </div>
         <p className="text-[#606060] text-xs">
-          <span className="text-white font-semibold">4,9/5</span> · +12 000 avis vérifiés · 100% gratuit
+          Analyse IA · résultat en quelques secondes
         </p>
       </motion.div>
 
@@ -461,7 +461,7 @@ export default function HeroSection({ onPhotoSelected }: HeroSectionProps) {
 
         <p className="text-center text-[#404040] text-xs flex items-center justify-center gap-1.5">
           <Lock size={10} className="flex-shrink-0" />
-          100% gratuit · Sans compte · Données supprimées immédiatement
+          Analyse gratuite · Compte requis pour débloquer ta photo
         </p>
       </motion.div>
 

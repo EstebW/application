@@ -6,7 +6,8 @@ set -e
 cd "$(dirname "$0")/.."
 PROJECT_REF=glgizfydsqsomrixgdyx
 
-for fn in session register analyze generate payment account; do
+# `payment` volontairement exclu (legacy mint crédits sans Stripe — désactivé).
+for fn in session register analyze generate account payment; do
   echo "Déploiement $fn..."
   npx supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
 done

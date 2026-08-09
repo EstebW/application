@@ -25,11 +25,6 @@ async function getAuthUser(req: Request): Promise<User | null> {
   }
 }
 
-function bindUserId(authUser: User | null, bodyUserId?: string): string | undefined {
-  if (authUser?.id) return authUser.id
-  return bodyUserId?.trim() || undefined
-}
-
 function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message
   if (typeof err === 'object' && err !== null && 'message' in err) {
@@ -45,6 +40,13 @@ Deno.serve(async (req: Request) => {
 
   try {
     const authUser = await getAuthUser(req)
+    if (!authUser?.id) {
+      return new Response(
+        JSON.stringify({ error: 'Connexion requise pour créer le compte' }),
+        { status: 401, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const body = await req.json() as {
       sessionId?: string
       email?: string
@@ -52,8 +54,9 @@ Deno.serve(async (req: Request) => {
       userId?: string
     }
 
-    const userId = bindUserId(authUser, body.userId)
-    const email = authUser?.email ?? body.email
+    // JWT uniquement — ignorer body.userId (anti-IDOR)
+    const userId = authUser.id
+    const email = authUser.email ?? body.email
     const { sessionId, firstName } = body
 
     if (!email?.trim()) {
@@ -69,13 +72,6 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({ error: 'Email invalide' }),
         { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    if (!userId) {
-      return new Response(
-        JSON.stringify({ error: 'Connexion requise pour créer le compte' }),
-        { status: 401, headers: { ...CORS, 'Content-Type': 'application/json' } }
       )
     }
 

@@ -135,7 +135,9 @@ export default function UserDashboard() {
             sessionId: data.sessionId,
             userId: user.id,
           })
-          const res = await fetch(`/api/stripe/billing?${qs}`)
+          const { getClientAuthHeaders } = await import('@/lib/client-auth-headers')
+          const authHeaders = await getClientAuthHeaders()
+          const res = await fetch(`/api/stripe/billing?${qs}`, { headers: authHeaders })
           if (res.ok) {
             const summary = (await res.json()) as StripeBillingSummary
             if (!cancelled) setBilling(summary)
@@ -209,9 +211,10 @@ export default function UserDashboard() {
     setPortalError('')
     setPortalLoading(true)
     try {
+      const { getClientAuthHeaders } = await import('@/lib/client-auth-headers')
       const res = await fetch('/api/stripe/portal', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getClientAuthHeaders(),
         body: JSON.stringify({ sessionId: account.sessionId, userId }),
       })
       const data = (await res.json()) as { url?: string; error?: string }

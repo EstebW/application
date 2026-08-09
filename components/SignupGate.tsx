@@ -147,7 +147,7 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
           {[...Array(5)].map((_, i) => (
             <Star key={i} size={13} className="text-[#D4AF37] fill-[#D4AF37]" />
           ))}
-          <span className="text-[#606060] text-xs ml-2">4,9/5 · +12 000 avis</span>
+          <span className="text-[#606060] text-xs ml-2">Création de compte sécurisée</span>
         </div>
       </motion.div>
 

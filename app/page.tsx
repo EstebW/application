@@ -864,11 +864,20 @@ export default function HomePage() {
       </main>
 
       {/* ── Footer ── */}
-      <footer className="relative z-10 text-center py-5 px-5">
+      <footer className="relative z-10 text-center py-5 px-5 space-y-2">
         <div className="h-px w-full mb-4"
           style={{ background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent)' }} />
         <p className="text-[#383838] text-[11px] tracking-wide">
-          StarFusion · Pour le divertissement uniquement · Tes photos ne sont pas stockées
+          StarFusion · Pour le divertissement uniquement
+        </p>
+        <p className="text-[#383838] text-[10px] flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+          <Link href="/legal/cgu" className="hover:text-[#606060]">CGU</Link>
+          <span>·</span>
+          <Link href="/legal/confidentialite" className="hover:text-[#606060]">Confidentialité</Link>
+          <span>·</span>
+          <Link href="/legal/remboursement" className="hover:text-[#606060]">Remboursement</Link>
+          <span>·</span>
+          <a href="mailto:contact@starfusion.online" className="hover:text-[#606060]">Support</a>
         </p>
       </footer>
     </div>

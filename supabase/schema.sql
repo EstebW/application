@@ -145,31 +145,9 @@ alter table credit_transactions enable row level security;
 alter table celebrity_heights enable row level security;
 alter table user_roles enable row level security;
 
--- Politique : INSERT ouvert (la clé anon peut créer des lignes)
-create policy "insert_sessions"    on sessions    for insert with check (true);
-create policy "insert_analyses"    on analyses    for insert with check (true);
-create policy "insert_generations" on generations for insert with check (true);
-create policy "insert_payments"    on payments    for insert with check (true);
-create policy "insert_credit_transactions" on credit_transactions for insert with check (true);
-create policy "select_credit_transactions" on credit_transactions for select using (true);
-
--- Politique : SELECT uniquement sa propre session
--- (les API routes utilisent service role et bypassent ces règles)
-create policy "select_own_sessions"
-  on sessions for select
-  using (true);   -- les sessions sont publiques (pas de données perso)
-
-create policy "select_own_analyses"
-  on analyses for select
-  using (true);
-
-create policy "select_own_generations"
-  on generations for select
-  using (true);
-
-create policy "select_own_payments"
-  on payments for select
-  using (true);
+-- RLS strict : aucune policy anon/authenticated sur les tables sensibles.
+-- Les edges / Next utilisent SUPABASE_SERVICE_ROLE_KEY (bypass RLS).
+-- Pour une base déjà ouverte, exécuter aussi scripts/harden-rls.sql.
 
 -- ── Storage bucket (images de référence temporaires) ───────────────────────
 -- Les images sont supprimées après génération (privacy).
@@ -186,17 +164,9 @@ values (
 )
 on conflict (id) do nothing;
 
--- Politique storage : tout le monde peut upload (clé service role requis côté serveur)
-create policy "allow_upload_temp"
-  on storage.objects for insert
-  with check (bucket_id = 'temp-images');
-
-create policy "allow_read_temp"
+-- Storage : lecture publique des URLs déjà créées ; upload/delete = service_role only
+create policy "temp_images_public_read"
   on storage.objects for select
-  using (bucket_id = 'temp-images');
-
-create policy "allow_delete_temp"
-  on storage.objects for delete
   using (bucket_id = 'temp-images');
 
 -- ── Vue analytics (optionnelle) ─────────────────────────────────
