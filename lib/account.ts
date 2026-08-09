@@ -39,6 +39,10 @@ export interface AccountData {
   stripeCustomerId?: string | null
   /** Taille déclarée — absente tant que l'utilisateur n'a pas fait le parcours « Choisis ta star » */
   heightCm?: number | null
+  /** Rôle résolu côté serveur (table user_roles) — affichage uniquement */
+  role?: 'user' | 'admin' | 'super_admin'
+  /** Bypass paywall / crédits — source de vérité serveur, jamais inventé côté client */
+  hasUnlimitedAccess?: boolean
   analyses: AccountAnalysis[]
   generations: AccountGeneration[]
   transactions: AccountTransaction[]

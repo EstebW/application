@@ -17,6 +17,8 @@ import { INTERACTION_OPTIONS } from '@/lib/interactions'
 interface PhotoSceneCustomizerProps {
   celebrity: CelebrityResult
   creditsBalance?: number
+  /** Affichage UI seulement — le débit est contrôlé côté edge generate */
+  hasUnlimitedAccess?: boolean
   /** Approche choisie dans le parcours « Choisis ta star » */
   creationMode?: CelebrityCreationMode
   /** Photo de base en mode photo_edit */
@@ -140,6 +142,7 @@ function InteractionPicker({
 export default function PhotoSceneCustomizer({
   celebrity,
   creditsBalance,
+  hasUnlimitedAccess = false,
   creationMode = DEFAULT_CREATION_MODE,
   basePhoto,
   initialRequest,
@@ -158,7 +161,7 @@ export default function PhotoSceneCustomizer({
   const [interaction, setInteraction] = useState<string | undefined>(initialRequest?.interaction)
   const [editNote, setEditNote] = useState(isPhotoEdit ? initialRequest?.customPrompt ?? '' : '')
 
-  const hasCredits = creditsBalance === undefined || creditsBalance > 0
+  const hasCredits = hasUnlimitedAccess || creditsBalance === undefined || creditsBalance > 0
   const canSubmitPresets = scene.location.trim() && scene.outfits.trim() && scene.position.trim()
   const canSubmitCustom = customPrompt.trim().length >= 20
   const canSubmit = isPhotoEdit
@@ -399,7 +402,12 @@ export default function PhotoSceneCustomizer({
       </motion.div>
 
       <motion.div variants={up} className="w-full space-y-3">
-        {typeof creditsBalance === 'number' && (
+        {hasUnlimitedAccess ? (
+          <p className="text-center text-xs text-[#606060]">
+            <span className="text-[#D4AF37] font-bold">Accès illimité</span>
+            {' '}· aucune consommation de crédits
+          </p>
+        ) : typeof creditsBalance === 'number' && (
           <p className="text-center text-xs text-[#606060]">
             {creditsBalance > 0 ? (
               <>

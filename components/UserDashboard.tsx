@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { callFunction } from '@/lib/functions'
 import type { AccountData } from '@/lib/account'
+import { accountHasUnlimitedAccess } from '@/lib/roles'
 import { PLAN_CENTS, PLAN_CREDITS, type PlanId, isPlanId } from '@/lib/plans'
 import PaymentScreen from '@/components/PaymentScreen'
 import { supabase } from '@/lib/supabase'
@@ -298,6 +299,7 @@ export default function UserDashboard() {
   }
 
   const subLabel = planLabel(activePlan ?? account.subscriptionPlan)
+  const unlimitedAccess = accountHasUnlimitedAccess(account)
 
   return (
     <div className="flex flex-col gap-6 w-full">
@@ -313,7 +315,21 @@ export default function UserDashboard() {
           border: '1px solid rgba(212,175,55,0.25)',
         }}
       >
-        <p className="text-[#606060] text-xs uppercase tracking-widest font-semibold">Mon compte</p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[#606060] text-xs uppercase tracking-widest font-semibold">Mon compte</p>
+          {unlimitedAccess && (
+            <span
+              className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
+              style={{
+                color: '#D4AF37',
+                background: 'rgba(212,175,55,0.12)',
+                border: '1px solid rgba(212,175,55,0.35)',
+              }}
+            >
+              Super Admin
+            </span>
+          )}
+        </div>
 
         <div className="flex flex-col gap-5 sm:flex-row sm:items-stretch sm:justify-between sm:gap-6">
           {/* Gauche — identité & abonnement */}
@@ -327,7 +343,15 @@ export default function UserDashboard() {
               </p>
             </div>
 
-            {isRecurring && subLabel ? (
+            {unlimitedAccess ? (
+              <div className="space-y-1 pt-1">
+                <p className="text-[#D4AF37] text-xs font-semibold flex items-center gap-1.5">
+                  <Crown size={12} className="flex-shrink-0" />
+                  Accès illimité
+                </p>
+                <p className="text-[#606060] text-xs pl-[18px]">Mode administrateur</p>
+              </div>
+            ) : isRecurring && subLabel ? (
               <div className="space-y-1 pt-1">
                 <p className="text-[#D4AF37] text-xs font-semibold flex items-center gap-1.5">
                   <Crown size={12} className="flex-shrink-0" />
@@ -348,7 +372,7 @@ export default function UserDashboard() {
             )}
           </div>
 
-          {/* Droite — crédits */}
+          {/* Droite — crédits (informatif même en Super Admin) */}
           <div
             className="sm:w-[140px] flex-shrink-0 rounded-2xl px-4 py-4 text-center flex flex-col items-center justify-center"
             style={{
@@ -360,14 +384,16 @@ export default function UserDashboard() {
               {account.creditsBalance}
             </p>
             <p className="text-[#808080] text-[11px] mt-2 font-medium leading-snug">
-              crédit{account.creditsBalance !== 1 ? 's' : ''} disponibles
+              {unlimitedAccess
+                ? 'crédits (info)'
+                : `crédit${account.creditsBalance !== 1 ? 's' : ''} disponibles`}
             </p>
           </div>
         </div>
 
         {/* Actions */}
         <div className="space-y-2.5 pt-1">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className={`grid grid-cols-1 ${unlimitedAccess ? '' : 'sm:grid-cols-2'} gap-2`}>
             <Link
               href="/"
               className="flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold text-black"
@@ -376,22 +402,24 @@ export default function UserDashboard() {
               <Plus size={15} />
               Nouvelle analyse
             </Link>
-            <button
-              type="button"
-              onClick={() => setShowPayment(true)}
-              className="flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold"
-              style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: '#A0A0A0',
-              }}
-            >
-              <CreditCard size={15} />
-              Acheter des crédits
-            </button>
+            {!unlimitedAccess && (
+              <button
+                type="button"
+                onClick={() => setShowPayment(true)}
+                className="flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: '#A0A0A0',
+                }}
+              >
+                <CreditCard size={15} />
+                Acheter des crédits
+              </button>
+            )}
           </div>
 
-          {canManageSubscription && (
+          {!unlimitedAccess && canManageSubscription && (
             <button
               type="button"
               onClick={openPortal}
@@ -429,7 +457,7 @@ export default function UserDashboard() {
         </button>
       </div>
 
-      {showPayment && (
+      {!unlimitedAccess && showPayment && (
         <div
           className="rounded-2xl p-4"
           style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)' }}

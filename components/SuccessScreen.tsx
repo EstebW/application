@@ -1,9 +1,21 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Download, Share2, RefreshCw, Crown, Check, LayoutDashboard } from 'lucide-react'
+import {
+  Download,
+  Share2,
+  RefreshCw,
+  Crown,
+  Check,
+  LayoutDashboard,
+  Copy,
+  Link2,
+  Mail,
+  MessageCircle,
+  X,
+} from 'lucide-react'
 import GoldParticles from './GoldParticles'
 import type { CelebrityResult } from '@/lib/types'
 import { resolveCelebrityImageUrl } from '@/lib/celebrity-image'
@@ -15,6 +27,7 @@ interface SuccessScreenProps {
   /** Photo de la star pour le fallback côte-à-côte */
   celebrityImageSrc?: string
   creditsBalance?: number
+  hasUnlimitedAccess?: boolean
   /** false pour le mode "Choisis ta star" — pas de score de ressemblance à afficher */
   showMatchScore?: boolean
   /** Relance une génération en gardant star, mode, photo source et options */
@@ -22,12 +35,20 @@ interface SuccessScreenProps {
   onReset: () => void
 }
 
-export default function SuccessScreen({ preview, generatedImage, celebrity, celebrityImageSrc, creditsBalance, showMatchScore = true, onRegenerate, onReset }: SuccessScreenProps) {
+export default function SuccessScreen({ preview, generatedImage, celebrity, celebrityImageSrc, creditsBalance, hasUnlimitedAccess = false, showMatchScore = true, onRegenerate, onReset }: SuccessScreenProps) {
   const { name, score } = celebrity
   const [shared, setShared] = useState(false)
   const [shareLabel, setShareLabel] = useState('Partagé !')
   const [downloaded, setDownloaded] = useState(false)
   const [fetchedCelebUrl, setFetchedCelebUrl] = useState<string | null>(null)
+  const [shareSheetOpen, setShareSheetOpen] = useState(false)
+  const [shareBusy, setShareBusy] = useState(false)
+  const shareFileRef = useRef<File | null>(null)
+
+  const shareTitle = `Ma photo avec ${name} — StarFusion`
+  const shareText = `Regarde ma photo avec ${name} sur StarFusion ✨`
+  const shareUrl =
+    typeof window !== 'undefined' ? `${window.location.origin}/` : 'https://starfusion.online/'
 
   useEffect(() => {
     if (celebrityImageSrc || generatedImage) return
@@ -58,12 +79,61 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
     return `starfusion-${slug || 'photo'}.jpg`
   }
 
+  async function getImageBlob(): Promise<Blob> {
+    const src = imageToDataUrl(generatedImage)
+    const res = await fetch(src)
+    const blob = await res.blob()
+    const type = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+    return blob.type === type ? blob : new Blob([blob], { type })
+  }
+
+  // Prépare le File dès l’écran succès — iOS exige un share synchrone au clic
+  useEffect(() => {
+    if (!generatedImage) {
+      shareFileRef.current = null
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const blob = await getImageBlob()
+        const mime = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+        const ext = mime.includes('png') ? '.png' : '.jpg'
+        const file = new File(
+          [blob],
+          downloadFileName().replace(/\.jpg$/i, ext),
+          { type: mime },
+        )
+        if (!cancelled) shareFileRef.current = file
+      } catch {
+        if (!cancelled) shareFileRef.current = null
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuild when image/name change
+  }, [generatedImage, name])
+
+  /** Vraie feuille système (iOS / Android / Safari) — comme AirDrop, Messages, WhatsApp… */
+  function canUseSystemShareSheet(): boolean {
+    if (typeof navigator === 'undefined' || typeof navigator.share !== 'function') return false
+    const ua = navigator.userAgent || ''
+    // Chrome / Edge desktop : share(files) télécharge au lieu d’ouvrir une feuille
+    const isChromium = /Chrome|Chromium|Edg\//i.test(ua) && !/OPR\//i.test(ua)
+    const isMobile =
+      /Android|iPhone|iPad|iPod/i.test(ua) ||
+      (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile === true ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    if (isMobile) return true
+    if (/Safari/i.test(ua) && !isChromium) return true // Safari macOS
+    return false
+  }
+
   async function handleDownload() {
     if (!generatedImage) return
     try {
-      const src = imageToDataUrl(generatedImage)
-      const res = await fetch(src)
-      const blob = await res.blob()
+      const blob = shareFileRef.current ?? (await getImageBlob())
       const objectUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = objectUrl
@@ -76,7 +146,6 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
       setDownloaded(true)
       setTimeout(() => setDownloaded(false), 2500)
     } catch {
-      // Fallback: open image in new tab so the user can save it manually
       window.open(imageToDataUrl(generatedImage), '_blank', 'noopener,noreferrer')
     }
   }
@@ -85,14 +154,6 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
     setShareLabel(label)
     setShared(true)
     setTimeout(() => setShared(false), 2800)
-  }
-
-  async function getImageBlob(): Promise<Blob> {
-    const src = imageToDataUrl(generatedImage)
-    const res = await fetch(src)
-    const blob = await res.blob()
-    const type = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
-    return blob.type === type ? blob : new Blob([blob], { type })
   }
 
   async function blobAsPng(blob: Blob): Promise<Blob> {
@@ -129,52 +190,137 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
     }
   }
 
-  async function handleShare() {
-    if (!generatedImage) return
-    const title = `Ma photo avec ${name} — StarFusion`
-    const text = `Regarde ma photo avec ${name} sur StarFusion`
-
+  async function copyTextToClipboard(text: string): Promise<boolean> {
     try {
-      const blob = await getImageBlob()
-      const mime = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
-      const file = new File([blob], downloadFileName().replace(/\.jpg$/i, mime.includes('png') ? '.png' : '.jpg'), {
-        type: mime,
-      })
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        return true
+      }
+    } catch {
+      // fall through
+    }
+    try {
+      const el = document.createElement('textarea')
+      el.value = text
+      el.setAttribute('readonly', '')
+      el.style.position = 'fixed'
+      el.style.opacity = '0'
+      document.body.appendChild(el)
+      el.select()
+      const ok = document.execCommand('copy')
+      el.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
 
-      // 1) Feuille de partage native avec le fichier (mobile / quelques desktop)
-      if (typeof navigator.share === 'function') {
-        const payloadWithFiles = { title, text, files: [file] }
-        if (!navigator.canShare || navigator.canShare(payloadWithFiles)) {
+  async function openSystemShareSheet(): Promise<boolean> {
+    if (typeof navigator.share !== 'function') return false
+    const file = shareFileRef.current
+    const withFiles = file ? { title: shareTitle, text: shareText, files: [file] } : null
+    if (withFiles && (!navigator.canShare || navigator.canShare(withFiles))) {
+      try {
+        await navigator.share(withFiles)
+        return true
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return true // annulé = OK
+      }
+    }
+    try {
+      await navigator.share({ title: shareTitle, text: shareText, url: shareUrl })
+      return true
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return true
+      return false
+    }
+  }
+
+  async function handleShare() {
+    if (!generatedImage || shareBusy) return
+    setShareBusy(true)
+    try {
+      // Mobile / Safari : feuille native (AirDrop, Messages, WhatsApp, Copier…)
+      if (canUseSystemShareSheet()) {
+        // Si le File n’est pas prêt, le préparer encore dans le geste utilisateur
+        if (!shareFileRef.current) {
           try {
-            await navigator.share(payloadWithFiles)
-            flashShare('Partagé !')
-            return
-          } catch (err) {
-            if (err instanceof DOMException && err.name === 'AbortError') return
-            // sinon on tente sans fichier
+            const blob = await getImageBlob()
+            const mime = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+            shareFileRef.current = new File(
+              [blob],
+              downloadFileName().replace(/\.jpg$/i, mime.includes('png') ? '.png' : '.jpg'),
+              { type: mime },
+            )
+          } catch {
+            // continue sans fichier
           }
         }
-
-        // 2) Partage texte seul (utile si les fichiers ne sont pas supportés)
-        try {
-          await navigator.share({ title, text })
+        const ok = await openSystemShareSheet()
+        if (ok) {
           flashShare('Partagé !')
           return
-        } catch (err) {
-          if (err instanceof DOMException && err.name === 'AbortError') return
         }
       }
+      // Desktop (Chrome…) : panneau StarFusion façon « share sheet »
+      setShareSheetOpen(true)
+    } finally {
+      setShareBusy(false)
+    }
+  }
 
-      // 3) Desktop : copier l'image dans le presse-papiers (pas de téléchargement)
+  async function shareActionCopyPhoto() {
+    try {
+      const blob = shareFileRef.current ?? (await getImageBlob())
       if (await copyImageToClipboard(blob)) {
         flashShare('Photo copiée !')
+        setShareSheetOpen(false)
         return
       }
-
-      flashShare('Partage indisponible')
+      flashShare('Copie impossible')
     } catch {
-      flashShare('Partage indisponible')
+      flashShare('Copie impossible')
     }
+  }
+
+  async function shareActionCopyLink() {
+    const ok = await copyTextToClipboard(`${shareText}\n${shareUrl}`)
+    flashShare(ok ? 'Lien copié !' : 'Copie impossible')
+    if (ok) setShareSheetOpen(false)
+  }
+
+  function shareActionWhatsApp() {
+    const url = `https://wa.me/?text=${encodeURIComponent(`${shareText}\n${shareUrl}`)}`
+    window.open(url, '_blank', 'noopener,noreferrer')
+    flashShare('WhatsApp')
+    setShareSheetOpen(false)
+  }
+
+  function shareActionMessages() {
+    window.location.href = `sms:&body=${encodeURIComponent(`${shareText}\n${shareUrl}`)}`
+    flashShare('Messages')
+    setShareSheetOpen(false)
+  }
+
+  function shareActionMail() {
+    window.location.href = `mailto:?subject=${encodeURIComponent(shareTitle)}&body=${encodeURIComponent(`${shareText}\n\n${shareUrl}`)}`
+    flashShare('Mail')
+    setShareSheetOpen(false)
+  }
+
+  async function shareActionMore() {
+    const ok = await openSystemShareSheet()
+    if (ok) {
+      flashShare('Partagé !')
+      setShareSheetOpen(false)
+      return
+    }
+    flashShare('Partage indisponible')
+  }
+
+  async function shareActionSave() {
+    await handleDownload()
+    setShareSheetOpen(false)
   }
 
   const containerVariants = {
@@ -317,6 +463,7 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
       {/* ── Actions ── */}
       <motion.div variants={item} className="w-full grid grid-cols-2 gap-3">
         <motion.button
+          type="button"
           onClick={handleDownload}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.97 }}
@@ -337,10 +484,16 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
         </motion.button>
 
         <motion.button
-          onClick={handleShare}
+          type="button"
+          disabled={shareBusy}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            void handleShare()
+          }}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.97 }}
-          className="flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-base"
+          className="flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-base disabled:opacity-60"
           style={{
             background: 'rgba(255,255,255,0.04)',
             border: '1.5px solid rgba(255,255,255,0.1)',
@@ -407,7 +560,12 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
 
       {/* ── Crédits restants + espace ── */}
       <motion.div variants={item} className="w-full flex flex-col gap-2">
-        {typeof creditsBalance === 'number' && (
+        {hasUnlimitedAccess ? (
+          <p className="text-center text-[#606060] text-xs">
+            <span className="text-[#D4AF37] font-bold">Accès illimité</span>
+            {' '}· régénère sans consommer de crédits
+          </p>
+        ) : typeof creditsBalance === 'number' && (
           <p className="text-center text-[#606060] text-xs">
             Il te reste{' '}
             <span className="text-[#D4AF37] font-bold">{creditsBalance} crédit{creditsBalance !== 1 ? 's' : ''}</span>
@@ -453,6 +611,159 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
         <RefreshCw size={13} />
         Recommencer avec une autre photo
       </motion.button>
+
+      {/* ── Feuille de partage (desktop / fallback) ── */}
+      <AnimatePresence>
+        {shareSheetOpen && (
+          <motion.div
+            className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <button
+              type="button"
+              aria-label="Fermer"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setShareSheetOpen(false)}
+            />
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Partager"
+              initial={{ y: 48, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 40, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+              className="relative z-10 w-full max-w-[390px] mx-3 mb-3 sm:mb-0 rounded-[28px] overflow-hidden"
+              style={{
+                background: 'linear-gradient(165deg,#1A1A1A 0%,#111111 100%)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                boxShadow: '0 24px 80px rgba(0,0,0,0.65)',
+              }}
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 rounded-full bg-white/15" />
+              </div>
+
+              <div className="px-5 pb-2 flex items-start gap-3">
+                <div
+                  className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0"
+                  style={{ border: '1px solid rgba(212,175,55,0.35)' }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={generatedImage} alt="" className="w-full h-full object-cover" />
+                </div>
+                <div className="min-w-0 flex-1 pt-0.5">
+                  <p className="text-white text-sm font-semibold truncate">Photo avec {name}</p>
+                  <p className="text-[#707070] text-xs mt-0.5">StarFusion · Partager</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShareSheetOpen(false)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[#808080] hover:text-white"
+                  style={{ background: 'rgba(255,255,255,0.06)' }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="px-5 pt-3 pb-2">
+                <p className="text-[#606060] text-[10px] uppercase tracking-widest font-semibold mb-3">
+                  Envoyer vers
+                </p>
+                <div className="grid grid-cols-4 gap-3">
+                  {[
+                    {
+                      key: 'wa',
+                      label: 'WhatsApp',
+                      onClick: shareActionWhatsApp,
+                      bg: '#25D366',
+                      icon: <MessageCircle size={20} className="text-white" />,
+                    },
+                    {
+                      key: 'sms',
+                      label: 'Messages',
+                      onClick: shareActionMessages,
+                      bg: '#34C759',
+                      icon: <MessageCircle size={20} className="text-white" />,
+                    },
+                    {
+                      key: 'mail',
+                      label: 'Mail',
+                      onClick: shareActionMail,
+                      bg: '#0A84FF',
+                      icon: <Mail size={20} className="text-white" />,
+                    },
+                    {
+                      key: 'more',
+                      label: 'Plus',
+                      onClick: () => { void shareActionMore() },
+                      bg: 'rgba(255,255,255,0.12)',
+                      icon: <Share2 size={20} className="text-white" />,
+                    },
+                  ].map((app) => (
+                    <button
+                      key={app.key}
+                      type="button"
+                      onClick={app.onClick}
+                      className="flex flex-col items-center gap-1.5 focus:outline-none"
+                    >
+                      <span
+                        className="w-14 h-14 rounded-[18px] flex items-center justify-center"
+                        style={{ background: app.bg }}
+                      >
+                        {app.icon}
+                      </span>
+                      <span className="text-[11px] text-[#A0A0A0] font-medium">{app.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="px-5 pt-4 pb-5 space-y-2">
+                <p className="text-[#606060] text-[10px] uppercase tracking-widest font-semibold mb-1">
+                  Actions
+                </p>
+                {[
+                  {
+                    key: 'copy-photo',
+                    label: 'Copier la photo',
+                    icon: <Copy size={16} />,
+                    onClick: () => { void shareActionCopyPhoto() },
+                  },
+                  {
+                    key: 'copy-link',
+                    label: 'Copier le lien',
+                    icon: <Link2 size={16} />,
+                    onClick: () => { void shareActionCopyLink() },
+                  },
+                  {
+                    key: 'save',
+                    label: 'Enregistrer l’image',
+                    icon: <Download size={16} />,
+                    onClick: () => { void shareActionSave() },
+                  },
+                ].map((action) => (
+                  <button
+                    key={action.key}
+                    type="button"
+                    onClick={action.onClick}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-semibold text-white/90"
+                    style={{
+                      background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                    }}
+                  >
+                    <span className="text-[#D4AF37]">{action.icon}</span>
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }

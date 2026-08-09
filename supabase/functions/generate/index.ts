@@ -5,6 +5,36 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Rôles — inlinés (le deploy Dashboard n'inclut pas ../_shared)
+type AppRole = 'user' | 'admin' | 'super_admin'
+const APP_ROLES = new Set<string>(['user', 'admin', 'super_admin'])
+
+function normalizeAppRole(value: unknown): AppRole {
+  return typeof value === 'string' && APP_ROLES.has(value) ? (value as AppRole) : 'user'
+}
+
+function hasUnlimitedAccess(role: AppRole | null | undefined): boolean {
+  return role === 'super_admin'
+}
+
+async function resolveAppRole(
+  db: ReturnType<typeof createClient>,
+  authUserId: string | null | undefined,
+): Promise<AppRole> {
+  if (!authUserId) return 'user'
+  try {
+    const { data, error } = await db
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', authUserId)
+      .maybeSingle()
+    if (error || !data) return 'user'
+    return normalizeAppRole((data as { role?: string | null }).role)
+  } catch {
+    return 'user'
+  }
+}
+
 async function getAuthUser(req: Request): Promise<User | null> {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) return null
@@ -695,12 +725,14 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
           '- Copy Person B\'s face EXACTLY from image_input[1]: same identity, same features, same hair as in that photo.',
           '- Do NOT invent a generic celebrity face. Do NOT use prior knowledge of the celebrity if it conflicts with image_input[1].',
           '- Do NOT beautify, morph, blend with Person A, or replace Person B with a different person.',
-          '- Allowed changes for Person B ONLY: body pose, outfit, and scene lighting falling on an UNCHANGED face.',
+          '- Allowed changes for Person B ONLY: body pose, FULL OUTFIT (mandatory — see wardrobe rules), and scene lighting falling on an UNCHANGED face.',
+          '- CLOTHING FROM image_input[1] IS NOT LOCKED. Discard the reference photo\'s suit, uniform, jersey, stage costume, or formalwear unless the USER SCENE BRIEF explicitly asks for that same outfit.',
           '',
           'FAILURE CONDITIONS (either one fails the whole result):',
           '- Person A is not instantly recognizable as the exact same person as image_input[0].',
           '- Person A\'s hair color/style or face width/volume differs from image_input[0].',
           '- Person B is not instantly recognizable as the exact same person as image_input[1].',
+          '- Person B still wears their iconic/reference clothing when the scene brief calls for casual / location-appropriate clothes.',
           '- Any face-swap artifact, melted features, hybrid face, or "AI beauty filter" look on either person.',
         ]
       : [
@@ -769,6 +801,26 @@ function photorealismBlock(celebrityName: string): string[] {
   ]
 }
 
+/**
+ * Tenues adaptées au lieu — pas aux habits iconiques de la star
+ * (ex. Macron en costard dans un parc → tenue civile décontractée).
+ */
+function sceneAdaptiveWardrobeBlock(celebrityName: string): string[] {
+  const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
+  return [
+    '⚠️ SCENE-ADAPTIVE WARDROBE (MANDATORY — SAME PRIORITY AS SCENE FIDELITY) ⚠️',
+    'Clothing is driven by LOCATION + OUTFIT BRIEF, never by the celebrity\'s famous look or by clothes visible in any reference photo.',
+    '',
+    `- Dress BOTH Person A and ${celeb} (Person B) for THIS specific setting, as real people would dress if they were actually there together.`,
+    `- Do NOT keep ${celeb}'s signature / official / stage / match-day / red-carpet / presidential / suit-and-tie wardrobe by default.`,
+    '- Examples: park / street / café / home / beach / laundromat → casual civilian clothes (jeans, sneakers, jacket, t-shirt…). Formal suit only if the brief explicitly asks for formalwear or a formal venue.',
+    '- If the outfit brief is playful or quirky, apply that spirit to BOTH people — matching vibes, not a VIP next to a tourist.',
+    '- If the outfit brief is vague, infer natural clothes from the location (weather, activity, time of day) — still casual when the place is casual.',
+    '- Reference images supply FACE and HAIR identity only. Their garments, shoes, accessories (except eyeglasses already on the locked face), and styling props must be redesigned for the scene.',
+    `- A park selfie with ${celeb} still in a formal suit / jersey / gown when the brief did not ask for it = FAILED wardrobe.`,
+  ]
+}
+
 /** « Créer une nouvelle photo » — le modèle recompose la scène. */
 function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   const {
@@ -794,9 +846,12 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
       ? '- Person A = face locked from image_input[0]. Person B = face locked from image_input[1].'
       : '- Person A (USER): face + hair + head proportions locked from image_input[0] — biometric identity preserved exactly; never morph toward the celebrity.',
     dual
-      ? `- Person B name label only (do not reinvent the face): ${celebrityName}${domain ? `, ${domain}` : ''}.`
-      : `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''} — separate person beside Person A. Do NOT borrow Person B\'s hair color, face shape, or features for Person A.`,
-    !dual && style ? `- Celebrity styling for Person B only (Person B clothes/vibe ONLY — never Person A\'s hair, face, or makeup): ${style}.` : '',
+      ? `- Person B name label only (do not reinvent the face): ${celebrityName}${domain ? `, ${domain}` : ''}. Clothes = scene-adapted, NOT from image_input[1].`
+      : `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''} — separate person beside Person A. Do NOT borrow Person B\'s hair color, face shape, or features for Person A. Dress Person B for the scene, not their iconic look.`,
+    // Style « vibe » de la star : jamais comme tenue figée — seulement si utile, et subordonné au lieu
+    !dual && style
+      ? `- Optional Person B fashion vibe (LOW priority — override with location-appropriate clothes if the scene is casual): ${style}.`
+      : '',
     mood ? `- Scene mood / energy only (NOT faces, NOT Person A\'s hair): ${mood}.` : '',
   ]
 
@@ -804,9 +859,11 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
     'SCENE REQUIREMENTS (secondary to face locks, but must still obey the brief):',
     '- Both people clearly visible in ONE cohesive real photograph.',
     '- Natural bodies/poses; faces remain identity-locked as above.',
+    '- Outfits for BOTH people must match the location and outfit brief (scene-adaptive wardrobe).',
     '- Tasteful, family-friendly content.',
     '- Single photo — not a collage, not a side-by-side split, not a face-swap glitch.',
     '- If anything conflicts with the face locks, DROP the conflicting detail and KEEP the faces.',
+    '- If iconic celebrity clothing conflicts with the scene, DROP the iconic clothing and KEEP the scene-appropriate outfits.',
   ]
 
   const finalReminder = dual
@@ -814,18 +871,20 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
         'FINAL MANDATORY CHECK:',
         '1) Compare Person A\'s output face to image_input[0] — must be the same person, unedited identity.',
         '2) Compare Person B\'s output face to image_input[1] — must be the same person, unedited identity.',
-        '3) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
-        '4) Does the scene match the user brief specifically (not a generic celebrity cliché)? If not, fix the scene.',
-        '5) Face integrity > scene beauty, but face locks AND amateur-phone realism AND brief fidelity are all required.',
+        '3) Are BOTH outfits appropriate for THIS location / outfit brief (not Person B\'s default suit/jersey/gown)? If not, restyle clothes.',
+        '4) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
+        '5) Does the scene match the user brief specifically (not a generic celebrity cliché)? If not, fix the scene.',
+        '6) Face integrity > scene beauty, but face locks AND amateur-phone realism AND brief fidelity AND scene-adaptive clothes are all required.',
       ]
     : [
         'FINAL MANDATORY CHECK:',
         '1) Compare Person A\'s output face to image_input[0] — same person, same face width/volume, same features, unedited identity.',
         '2) Compare Person A\'s hair to image_input[0] — same color, texture, length, and style (no celebrity hair transplant).',
         '3) Person A must NOT look like a blend/average with the celebrity.',
-        '4) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
-        '5) Does the scene match the user brief specifically? If not, fix the scene.',
-        '6) Face + hair integrity of Person A > scene beauty. If identity drifted, the result is invalid.',
+        '4) Are BOTH outfits appropriate for THIS location / outfit brief (celebrity not stuck in iconic formalwear)? If not, restyle clothes.',
+        '5) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
+        '6) Does the scene match the user brief specifically? If not, fix the scene.',
+        '7) Face + hair integrity of Person A > scene beauty. If identity drifted, the result is invalid.',
       ]
 
   const opener = dual
@@ -849,6 +908,8 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
       ...facePreservationBlock(dual),
       '',
       ...photorealismBlock(celebrityName),
+      '',
+      ...sceneAdaptiveWardrobeBlock(celebrityName),
       '',
       heightSection,
       '',
@@ -878,11 +939,13 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...photorealismBlock(celebrityName),
     '',
+    ...sceneAdaptiveWardrobeBlock(celebrityName),
+    '',
     heightSection,
     '',
     'USER SCENE BRIEF (setting/outfits/pose ONLY — faces stay locked; follow literally):',
     `1. LOCATION / SETTING: ${location}`,
-    `2. OUTFITS for both people: ${outfits}`,
+    `2. OUTFITS for both people (MUST adapt to the location — no iconic celebrity default clothes): ${outfits}`,
     `3. POSE and FRAMING: ${position}`,
     interactionLine,
     '',
@@ -1349,12 +1412,17 @@ Deno.serve(async (req: Request) => {
       })
     }
 
+    // Bypass crédits : uniquement si le JWT est valide ET le rôle DB = super_admin.
+    // Jamais depuis body.userId / body.role / email client.
+    const appRole = await resolveAppRole(db, authUser?.id)
+    const unlimitedAccess = hasUnlimitedAccess(appRole)
+
     const billingSession = (sessionId || userId || email?.trim())
       ? await resolveBillingSession(db, { sessionId, userId, email })
       : null
     const billingSessionId = billingSession?.id ?? sessionId
 
-    if (billingSessionId) {
+    if (billingSessionId && !unlimitedAccess) {
       const balance = billingSession?.credits_balance ?? 0
       if (balance < GENERATION_CREDIT_COST) {
         return new Response(
@@ -1404,7 +1472,10 @@ Deno.serve(async (req: Request) => {
           .single()
 
         const currentBalance = session?.credits_balance ?? 0
-        const newBalance = currentBalance - GENERATION_CREDIT_COST
+        // Super Admin : pas de débit ni de mouvement crédit -1
+        const newBalance = unlimitedAccess
+          ? currentBalance
+          : currentBalance - GENERATION_CREDIT_COST
 
         const generationRow = {
           session_id: billingSessionId,
@@ -1430,17 +1501,19 @@ Deno.serve(async (req: Request) => {
 
         generationId = inserted.data?.id
 
-        await db
-          .from('sessions')
-          .update({ credits_balance: newBalance })
-          .eq('id', billingSessionId)
+        if (!unlimitedAccess) {
+          await db
+            .from('sessions')
+            .update({ credits_balance: newBalance })
+            .eq('id', billingSessionId)
 
-        await db.from('credit_transactions').insert({
-          session_id: billingSessionId,
-          amount: -GENERATION_CREDIT_COST,
-          reason: 'generation',
-          reference_id: generationId ?? null,
-        })
+          await db.from('credit_transactions').insert({
+            session_id: billingSessionId,
+            amount: -GENERATION_CREDIT_COST,
+            reason: 'generation',
+            reference_id: generationId ?? null,
+          })
+        }
 
         creditsBalance = newBalance
       } catch (dbErr) {

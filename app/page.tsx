@@ -26,6 +26,7 @@ import type { CelebrityCreationMode, CelebrityResult, GenerationRequest } from '
 import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { callFunction } from '@/lib/functions'
 import type { AccountData } from '@/lib/account'
+import { accountHasUnlimitedAccess } from '@/lib/roles'
 import { supabase } from '@/lib/supabase'
 import {
   getStoredSessionId,
@@ -70,10 +71,11 @@ function getStepperState(
   userId: string | undefined,
   creditsBalance: number,
   appMode: AppMode | null,
+  unlimitedAccess = false,
 ): { labels: readonly string[]; index: number } {
   const loggedIn = Boolean(userId)
-  const onPaywall = step === 'payment' || step === 'signup'
-  const needsPay = !loggedIn || creditsBalance <= 0 || onPaywall
+  const onPaywall = !unlimitedAccess && (step === 'payment' || step === 'signup')
+  const needsPay = !unlimitedAccess && (!loggedIn || creditsBalance <= 0 || onPaywall)
 
   if (appMode === 'match') {
     if (loggedIn && !needsPay) {
@@ -161,14 +163,22 @@ export default function HomePage() {
   const [generationId, setGenerationId] = useState('')
   const [generationRequest, setGenerationRequest] = useState<GenerationRequest | null>(null)
   const [creditsBalance, setCreditsBalance] = useState(0)
+  const [unlimitedAccess, setUnlimitedAccess] = useState(false)
   const [userId, setUserId] = useState<string | undefined>()
   const [userEmail, setUserEmail] = useState<string | undefined>()
   const sessionInitialized = useRef(false)
 
+  const applyAccountFlags = useCallback((data: AccountData) => {
+    setCreditsBalance(data.creditsBalance)
+    const unlimited = accountHasUnlimitedAccess(data)
+    setUnlimitedAccess(unlimited)
+    if (unlimited) setHasUnlocked(true)
+  }, [])
+
   const refreshAccount = useCallback(async (opts: { sessionId?: string; userId?: string; email?: string }) => {
     try {
       const data = await callFunction<AccountData>('account', opts)
-      setCreditsBalance(data.creditsBalance)
+      applyAccountFlags(data)
       // Préremplissage : le profil ne doit jamais écraser une saisie en cours.
       if (isValidUserHeightCm(data.heightCm)) {
         setUserHeightCm((current) => current ?? data.heightCm ?? undefined)
@@ -184,7 +194,7 @@ export default function HomePage() {
     } catch {
       // compte pas encore migré ou session invalide
     }
-  }, [])
+  }, [applyAccountFlags])
 
   // Create or restore Supabase session on mount — sync avec le compte auth si connecté
   useEffect(() => {
@@ -241,6 +251,8 @@ export default function HomePage() {
         }
       } else {
         setUserId(undefined)
+        setUnlimitedAccess(false)
+        setHasUnlocked(false)
       }
     })
     return () => subscription.unsubscribe()
@@ -248,7 +260,7 @@ export default function HomePage() {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
-  /** Après teaser / star : toujours passer par la page paiement (crédits → bouton « continuer » dessus). */
+  /** Après teaser / star : paywall (sauf Super Admin — accès illimité serveur). */
   const routeToUnlock = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
 
@@ -269,7 +281,7 @@ export default function HomePage() {
         sessionId: sessionId || undefined,
         email: user.email ?? userEmail,
       })
-      setCreditsBalance(data.creditsBalance)
+      applyAccountFlags(data)
       if (data.sessionId) {
         setSessionId(data.sessionId)
         setStoredSessionId(data.sessionId)
@@ -278,13 +290,17 @@ export default function HomePage() {
         setUserEmail(data.email)
         setStoredEmail(data.email)
       }
+      if (accountHasUnlimitedAccess(data)) {
+        setStep(appMode === 'match' ? 'result' : 'customize')
+        return
+      }
     } catch {
       // ignore
     }
 
-    // Ne jamais sauter cette étape — même avec des crédits déjà disponibles
+    // Utilisateurs normaux : toujours passer par la page paiement
     setStep('payment')
-  }, [sessionId, userEmail])
+  }, [sessionId, userEmail, appMode, applyAccountFlags])
 
   const handleSelectMatchMode = useCallback(() => {
     setAppMode('match')
@@ -381,8 +397,23 @@ export default function HomePage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) setUserId(user.id)
 
+    try {
+      const data = await callFunction<AccountData>('account', {
+        userId: user?.id,
+        sessionId: meta?.sessionId || sessionId || undefined,
+        email: email || user?.email || userEmail,
+      })
+      applyAccountFlags(data)
+      if (accountHasUnlimitedAccess(data)) {
+        setStep(appMode === 'match' ? 'result' : 'customize')
+        return
+      }
+    } catch {
+      // ignore
+    }
+
     setStep('payment')
-  }, [])
+  }, [sessionId, userEmail, appMode, applyAccountFlags])
 
   const handlePaymentSuccess = useCallback((newBalance: number) => {
     setCreditsBalance(newBalance)
@@ -476,8 +507,9 @@ export default function HomePage() {
   }, [appMode])
 
   const handleInsufficientCredits = useCallback(() => {
+    if (unlimitedAccess) return
     setStep('payment')
-  }, [])
+  }, [unlimitedAccess])
 
   const handleContinueToScene = useCallback(() => {
     setStep('customize')
@@ -625,7 +657,7 @@ export default function HomePage() {
       {step !== 'modeChoice' && (
         <div className="relative z-20 px-5 max-w-[390px] mx-auto w-full">
           {(() => {
-            const stepper = getStepperState(step, userId, creditsBalance, appMode)
+            const stepper = getStepperState(step, userId, creditsBalance, appMode, unlimitedAccess)
             return <Stepper labels={stepper.labels} currentStep={stepper.index} />
           })()}
         </div>
@@ -778,6 +810,7 @@ export default function HomePage() {
               <PhotoSceneCustomizer
                 celebrity={celebrity}
                 creditsBalance={creditsBalance}
+                hasUnlimitedAccess={unlimitedAccess}
                 creationMode={appMode === 'custom' ? creationMode : DEFAULT_CREATION_MODE}
                 basePhoto={basePhoto || undefined}
                 initialRequest={generationRequest ?? undefined}
@@ -819,6 +852,7 @@ export default function HomePage() {
                 celebrity={celebrity}
                 celebrityImageSrc={celebrityPhoto || undefined}
                 creditsBalance={creditsBalance}
+                hasUnlimitedAccess={unlimitedAccess}
                 showMatchScore={appMode !== 'custom'}
                 onRegenerate={handleRegenerate}
                 onReset={handleReset}

@@ -7,6 +7,34 @@ const CORS = {
 
 type DbClient = ReturnType<typeof createClient>
 
+// Rôles — inlinés (le deploy Dashboard n'inclut pas ../_shared)
+type AppRole = 'user' | 'admin' | 'super_admin'
+const APP_ROLES = new Set<string>(['user', 'admin', 'super_admin'])
+
+function normalizeAppRole(value: unknown): AppRole {
+  return typeof value === 'string' && APP_ROLES.has(value) ? (value as AppRole) : 'user'
+}
+
+function hasUnlimitedAccess(role: AppRole | null | undefined): boolean {
+  return role === 'super_admin'
+}
+
+/** Résout le rôle depuis user_roles pour un JWT vérifié — jamais depuis le body client. */
+async function resolveAppRole(db: DbClient, authUserId: string | null | undefined): Promise<AppRole> {
+  if (!authUserId) return 'user'
+  try {
+    const { data, error } = await db
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', authUserId)
+      .maybeSingle()
+    if (error || !data) return 'user'
+    return normalizeAppRole((data as { role?: string | null }).role)
+  } catch {
+    return 'user'
+  }
+}
+
 async function getAuthUser(req: Request): Promise<User | null> {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) return null
@@ -233,6 +261,10 @@ Deno.serve(async (req: Request) => {
       email,
     })
 
+    // Rôle uniquement depuis le JWT vérifié — jamais depuis body.role / body.userId seul
+    const appRole = await resolveAppRole(db, authUser?.id)
+    const unlimitedAccess = hasUnlimitedAccess(appRole)
+
     // Historique : uniquement les lignes de CE user, ou créées après la prise de possession
     let analysesQuery = db
       .from('analyses')
@@ -411,6 +443,8 @@ Deno.serve(async (req: Request) => {
         // Prérempli le champ de taille du parcours « Choisis ta star ».
         // undefined tant que la colonne n'existe pas (migration non appliquée).
         heightCm: typeof primary.height_cm === 'number' ? primary.height_cm : null,
+        role: appRole,
+        hasUnlimitedAccess: unlimitedAccess,
         analyses: analyses.map(({ session_id: _s, user_id: _u, ...rest }) => ({
           ...rest,
           celebrity_name: formatCelebrityName(String(rest.celebrity_name ?? '')),

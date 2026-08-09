@@ -168,6 +168,22 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['credit_transactions']['Insert']>
         Relationships: []
       }
+      user_roles: {
+        Row: {
+          user_id: string
+          role: 'user' | 'admin' | 'super_admin'
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          role?: 'user' | 'admin' | 'super_admin'
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['user_roles']['Insert']>
+        Relationships: []
+      }
     }
     Views: Record<string, never>
     Functions: Record<string, never>

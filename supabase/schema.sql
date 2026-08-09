@@ -122,6 +122,16 @@ create table if not exists payments (
 create index if not exists payments_session_idx on payments(session_id);
 create index if not exists payments_status_idx  on payments(status);
 
+-- ── user_roles ───────────────────────────────────────────────────
+-- Rôles applicatifs (user | admin | super_admin). Écriture manuelle / service_role.
+create table if not exists user_roles (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  role       text not null default 'user'
+               check (role in ('user', 'admin', 'super_admin')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- ── RLS (Row Level Security) ─────────────────────────────────────
 -- Les API routes utilisent la clé service role et contournent le RLS.
 -- Le client browser (anon) ne peut pas lire les données des autres sessions.
@@ -131,8 +141,9 @@ alter table analyses   enable row level security;
 alter table generations enable row level security;
 alter table payments   enable row level security;
 alter table credit_transactions enable row level security;
--- Aucune policy sur celebrity_heights : table serveur uniquement (service role)
+-- Aucune policy sur celebrity_heights / user_roles : tables serveur uniquement (service role)
 alter table celebrity_heights enable row level security;
+alter table user_roles enable row level security;
 
 -- Politique : INSERT ouvert (la clé anon peut créer des lignes)
 create policy "insert_sessions"    on sessions    for insert with check (true);

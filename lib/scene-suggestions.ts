@@ -113,10 +113,11 @@ const DEFAULT_SUGGESTIONS: SceneSuggestions = {
     'Rayon IKEA canapés, vous testez le « Lithem » avec trop de sérieux',
     'Laverie automatique 23h, panier à linge entre vous deux',
   ],
+  // Tenues civiles / adaptées au quotidien — pas de costard VIP par défaut
   outfits: [
-    'Tenues chic + gilets de sauvetage fluo « au cas où »',
-    'Costumes d\'anniversaire enfant trop petits, badges prénom',
-    'Looks premium froissés genre « on a dormi dans l\'avion »',
+    'Jean + sneakers + sweat / veste légère, looks de sortie entre potes',
+    'Tenues casual décontractées (t-shirt, jean, baskets) adaptées au lieu',
+    'Looks premium froissés genre « on a dormi dans l\'avion » — toujours civils',
     'Matching pajamas soyeux + lunettes de soleil indoor',
   ],
   positions: [
@@ -179,12 +180,14 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
           '- Copy Person B\'s face EXACTLY from image_input[1]: same identity, same features, same hair as in that photo.',
           '- Do NOT invent a generic celebrity face. Do NOT use prior knowledge of the celebrity if it conflicts with image_input[1].',
           '- Do NOT beautify, morph, blend with Person A, or replace Person B with a different person.',
-          '- Allowed changes for Person B ONLY: body pose, outfit, and scene lighting falling on an UNCHANGED face.',
+          '- Allowed changes for Person B ONLY: body pose, FULL OUTFIT (mandatory — see wardrobe rules), and scene lighting falling on an UNCHANGED face.',
+          '- CLOTHING FROM image_input[1] IS NOT LOCKED. Discard the reference photo\'s suit, uniform, jersey, stage costume, or formalwear unless the USER SCENE BRIEF explicitly asks for that same outfit.',
           '',
           'FAILURE CONDITIONS (either one fails the whole result):',
           '- Person A is not instantly recognizable as the exact same person as image_input[0].',
           '- Person A\'s hair color/style or face width/volume differs from image_input[0].',
           '- Person B is not instantly recognizable as the exact same person as image_input[1].',
+          '- Person B still wears their iconic/reference clothing when the scene brief calls for casual / location-appropriate clothes.',
           '- Any face-swap artifact, melted features, hybrid face, or "AI beauty filter" look on either person.',
         ]
       : [
@@ -254,6 +257,26 @@ function photorealismBlock(celebrityName: string): string[] {
 }
 
 /**
+ * Tenues adaptées au lieu — pas aux habits iconiques de la star
+ * (ex. Macron en costard dans un parc → tenue civile décontractée).
+ */
+function sceneAdaptiveWardrobeBlock(celebrityName: string): string[] {
+  const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
+  return [
+    '⚠️ SCENE-ADAPTIVE WARDROBE (MANDATORY — SAME PRIORITY AS SCENE FIDELITY) ⚠️',
+    'Clothing is driven by LOCATION + OUTFIT BRIEF, never by the celebrity\'s famous look or by clothes visible in any reference photo.',
+    '',
+    `- Dress BOTH Person A and ${celeb} (Person B) for THIS specific setting, as real people would dress if they were actually there together.`,
+    `- Do NOT keep ${celeb}'s signature / official / stage / match-day / red-carpet / presidential / suit-and-tie wardrobe by default.`,
+    '- Examples: park / street / café / home / beach / laundromat → casual civilian clothes (jeans, sneakers, jacket, t-shirt…). Formal suit only if the brief explicitly asks for formalwear or a formal venue.',
+    '- If the outfit brief is playful or quirky, apply that spirit to BOTH people — matching vibes, not a VIP next to a tourist.',
+    '- If the outfit brief is vague, infer natural clothes from the location (weather, activity, time of day) — still casual when the place is casual.',
+    '- Reference images supply FACE and HAIR identity only. Their garments, shoes, accessories (except eyeglasses already on the locked face), and styling props must be redesigned for the scene.',
+    `- A park selfie with ${celeb} still in a formal suit / jersey / gown when the brief did not ask for it = FAILED wardrobe.`,
+  ]
+}
+
+/**
  * Prompt « Créer une nouvelle photo » — scènes guidées ou prompt libre utilisateur.
  * Le modèle recompose la scène en gardant l'identité de l'utilisateur.
  */
@@ -282,9 +305,11 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
       ? '- Person A = face locked from image_input[0]. Person B = face locked from image_input[1].'
       : '- Person A (USER): face + hair + head proportions locked from image_input[0] — biometric identity preserved exactly; never morph toward the celebrity.',
     dual
-      ? `- Person B name label only (do not reinvent the face): ${celebrityName}${domain ? `, ${domain}` : ''}.`
-      : `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''} — separate person beside Person A. Do NOT borrow Person B\'s hair color, face shape, or features for Person A.`,
-    !dual && style ? `- Celebrity styling for Person B only (Person B clothes/vibe ONLY — never Person A\'s hair, face, or makeup): ${style}.` : '',
+      ? `- Person B name label only (do not reinvent the face): ${celebrityName}${domain ? `, ${domain}` : ''}. Clothes = scene-adapted, NOT from image_input[1].`
+      : `- Person B (CELEBRITY): ${celebrityName}${domain ? `, ${domain}` : ''} — separate person beside Person A. Do NOT borrow Person B\'s hair color, face shape, or features for Person A. Dress Person B for the scene, not their iconic look.`,
+    !dual && style
+      ? `- Optional Person B fashion vibe (LOW priority — override with location-appropriate clothes if the scene is casual): ${style}.`
+      : '',
     mood ? `- Scene mood / energy only (NOT faces, NOT Person A\'s hair): ${mood}.` : '',
   ]
 
@@ -292,9 +317,11 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
     'SCENE REQUIREMENTS (secondary to face locks, but must still obey the brief):',
     '- Both people clearly visible in ONE cohesive real photograph.',
     '- Natural bodies/poses; faces remain identity-locked as above.',
+    '- Outfits for BOTH people must match the location and outfit brief (scene-adaptive wardrobe).',
     '- Tasteful, family-friendly content.',
     '- Single photo — not a collage, not a side-by-side split, not a face-swap glitch.',
     '- If anything conflicts with the face locks, DROP the conflicting detail and KEEP the faces.',
+    '- If iconic celebrity clothing conflicts with the scene, DROP the iconic clothing and KEEP the scene-appropriate outfits.',
   ]
 
   const finalReminder = dual
@@ -302,18 +329,20 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
         'FINAL MANDATORY CHECK:',
         '1) Compare Person A\'s output face to image_input[0] — must be the same person, unedited identity.',
         '2) Compare Person B\'s output face to image_input[1] — must be the same person, unedited identity.',
-        '3) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
-        '4) Does the scene match the user brief specifically (not a generic celebrity cliché)? If not, fix the scene.',
-        '5) Face integrity > scene beauty, but face locks AND amateur-phone realism AND brief fidelity are all required.',
+        '3) Are BOTH outfits appropriate for THIS location / outfit brief (not Person B\'s default suit/jersey/gown)? If not, restyle clothes.',
+        '4) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
+        '5) Does the scene match the user brief specifically (not a generic celebrity cliché)? If not, fix the scene.',
+        '6) Face integrity > scene beauty, but face locks AND amateur-phone realism AND brief fidelity AND scene-adaptive clothes are all required.',
       ]
     : [
         'FINAL MANDATORY CHECK:',
         '1) Compare Person A\'s output face to image_input[0] — same person, same face width/volume, same features, unedited identity.',
         '2) Compare Person A\'s hair to image_input[0] — same color, texture, length, and style (no celebrity hair transplant).',
         '3) Person A must NOT look like a blend/average with the celebrity.',
-        '4) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
-        '5) Does the scene match the user brief specifically? If not, fix the scene.',
-        '6) Face + hair integrity of Person A > scene beauty. If identity drifted, the result is invalid.',
+        '4) Are BOTH outfits appropriate for THIS location / outfit brief (celebrity not stuck in iconic formalwear)? If not, restyle clothes.',
+        '5) Does it look like a raw smartphone snap (Snapchat/BeReal/Stories), NOT AI/CGI/studio/glamour? If not, fix realism.',
+        '6) Does the scene match the user brief specifically? If not, fix the scene.',
+        '7) Face + hair integrity of Person A > scene beauty. If identity drifted, the result is invalid.',
       ]
 
   const opener = dual
@@ -337,6 +366,8 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
       ...facePreservationBlock(dual),
       '',
       ...photorealismBlock(celebrityName),
+      '',
+      ...sceneAdaptiveWardrobeBlock(celebrityName),
       '',
       heightSection,
       '',
@@ -368,11 +399,13 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...photorealismBlock(celebrityName),
     '',
+    ...sceneAdaptiveWardrobeBlock(celebrityName),
+    '',
     heightSection,
     '',
     'USER SCENE BRIEF (setting/outfits/pose ONLY — faces stay locked; follow literally):',
     `1. LOCATION / SETTING: ${location}`,
-    `2. OUTFITS for both people: ${outfits}`,
+    `2. OUTFITS for both people (MUST adapt to the location — no iconic celebrity default clothes): ${outfits}`,
     `3. POSE and FRAMING: ${position}`,
     interactionLine,
     '',
