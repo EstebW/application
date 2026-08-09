@@ -18,6 +18,20 @@ export async function signInWithEmail(email: string, password: string) {
   return data
 }
 
+/**
+ * Connexion / inscription Google via Supabase OAuth.
+ * Redirige vers Google puis revient sur `/auth/callback?next=…`.
+ */
+export async function signInWithGoogle(nextPath = '/dashboard') {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo },
+  })
+  if (error) throw error
+}
+
 export async function signOut() {
   const { error } = await supabase.auth.signOut()
   if (error) throw error
@@ -41,6 +55,12 @@ export function formatAuthError(message: string): string {
   }
   if (lower.includes('email not confirmed')) {
     return 'Confirme ton email avant de te connecter.'
+  }
+  if (lower.includes('provider is not enabled') || lower.includes('unsupported provider')) {
+    return 'Connexion Google pas encore activée. Utilise email / mot de passe.'
+  }
+  if (lower.includes('oauth') || lower.includes('access_denied')) {
+    return 'Connexion Google annulée ou refusée.'
   }
   return message
 }

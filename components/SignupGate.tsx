@@ -6,10 +6,13 @@ import { Sparkles, Lock, ChevronRight, Star } from 'lucide-react'
 import { callFunction } from '@/lib/functions'
 import { signUpWithEmail, signInWithEmail, formatAuthError } from '@/lib/auth'
 import { setStoredEmail, setStoredSessionId } from '@/lib/session-storage'
+import GoogleAuthButton from '@/components/GoogleAuthButton'
 
 interface SignupGateProps {
   score?: number
   sessionId?: string
+  /** Sauvegarde le funnel avant redirect Google */
+  onBeforeGoogle?: () => void
   onSuccess: (firstName: string, email: string, meta?: { sessionId?: string; creditsBalance?: number }) => void
 }
 
@@ -22,7 +25,7 @@ const up = {
   show: { opacity: 1, y: 0, transition: { duration: 0.65, ease: [0.22, 1, 0.36, 1] as const } },
 }
 
-export default function SignupGate({ score, sessionId, onSuccess }: SignupGateProps) {
+export default function SignupGate({ score, sessionId, onBeforeGoogle, onSuccess }: SignupGateProps) {
   const [firstName, setFirstName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -148,6 +151,21 @@ export default function SignupGate({ score, sessionId, onSuccess }: SignupGatePr
             <Star key={i} size={13} className="text-[#D4AF37] fill-[#D4AF37]" />
           ))}
           <span className="text-[#606060] text-xs ml-2">Création de compte sécurisée</span>
+        </div>
+      </motion.div>
+
+      <motion.div variants={up} className="w-full space-y-3">
+        <GoogleAuthButton
+          nextPath="/?oauth=funnel"
+          label="Continuer avec Google"
+          onBeforeRedirect={onBeforeGoogle}
+          onError={setError}
+        />
+
+        <div className="flex items-center gap-3 py-1">
+          <div className="flex-1 h-px bg-white/10" />
+          <span className="text-[#505050] text-[11px] uppercase tracking-wider">ou</span>
+          <div className="flex-1 h-px bg-white/10" />
         </div>
       </motion.div>
 

@@ -43,6 +43,11 @@ import {
   clearCheckoutReturnContext,
   readCheckoutReturnContext,
 } from '@/lib/checkout-return'
+import {
+  clearOAuthReturnContext,
+  readOAuthReturnContext,
+  saveOAuthReturnContext,
+} from '@/lib/oauth-return'
 
 // ── Deux funnels :
 // 1) Match : photo → analyse → teaser flouté → (compte) → paiement → révélation jumeau → scène → génération
@@ -421,6 +426,88 @@ export default function HomePage() {
     setStep(appMode === 'match' ? 'result' : 'customize')
   }, [appMode])
 
+  // Retour Google OAuth depuis le SignupGate → reprendre le funnel (paiement)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('oauth') !== 'funnel') return
+
+    let cancelled = false
+
+    async function resumeAfterGoogle() {
+      const ctx = readOAuthReturnContext()
+      clearOAuthReturnContext()
+      window.history.replaceState({}, '', '/')
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (cancelled || !user) return
+
+      setUserId(user.id)
+      if (user.email) {
+        setUserEmail(user.email)
+        setStoredEmail(user.email)
+      }
+
+      try {
+        const data = await callFunction<AccountData>('account', {
+          userId: user.id,
+          email: user.email ?? undefined,
+          sessionId: ctx?.sessionId || sessionId || undefined,
+        })
+        applyAccountFlags(data)
+        if (data.sessionId) {
+          setSessionId(data.sessionId)
+          setStoredSessionId(data.sessionId)
+        }
+      } catch {
+        // ignore
+      }
+
+      if (ctx?.celebrity) {
+        setCelebrity({
+          name: ctx.celebrity.name,
+          score: ctx.celebrity.score,
+          traits: ctx.celebrity.traits ?? [],
+          celebrity_domain: ctx.celebrity.celebrity_domain ?? '',
+          celebrity_style_description: ctx.celebrity.celebrity_style_description ?? '',
+          fun_fact: ctx.celebrity.fun_fact ?? '',
+        })
+      }
+      if (ctx?.photoPreview) setPhotoPreview(ctx.photoPreview)
+      if (ctx?.celebrityPhoto) setCelebrityPhoto(ctx.celebrityPhoto)
+      if (ctx?.analysisId) setAnalysisId(ctx.analysisId)
+      if (ctx?.creationMode) setCreationMode(ctx.creationMode)
+      if (ctx?.basePhoto) setBasePhoto(ctx.basePhoto)
+      if (typeof ctx?.userHeightCm === 'number') setUserHeightCm(ctx.userHeightCm)
+      if (ctx?.appMode === 'match' || ctx?.appMode === 'custom') setAppMode(ctx.appMode)
+
+      // Super Admin : skip paywall ; sinon paiement
+      try {
+        const data = await callFunction<AccountData>('account', {
+          userId: user.id,
+          email: user.email ?? undefined,
+        })
+        applyAccountFlags(data)
+        if (accountHasUnlimitedAccess(data)) {
+          setStep((ctx?.appMode ?? appMode) === 'match' ? 'result' : 'customize')
+          return
+        }
+      } catch {
+        // ignore
+      }
+
+      if (ctx?.celebrity) {
+        setStep('payment')
+      } else {
+        setStep('modeChoice')
+      }
+    }
+
+    void resumeAfterGoogle()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot OAuth return
+  }, [])
+
   // Retour Stripe Checkout → confirmer le paiement et reprendre le funnel
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -762,6 +849,29 @@ export default function HomePage() {
               <SignupGate
                 score={appMode === 'custom' ? undefined : celebrity.score}
                 sessionId={sessionId}
+                onBeforeGoogle={() => {
+                  saveOAuthReturnContext({
+                    intent: 'funnel',
+                    sessionId: sessionId || undefined,
+                    appMode,
+                    celebrity: celebrity
+                      ? {
+                          name: celebrity.name,
+                          score: celebrity.score,
+                          traits: celebrity.traits,
+                          celebrity_domain: celebrity.celebrity_domain,
+                          celebrity_style_description: celebrity.celebrity_style_description,
+                          fun_fact: celebrity.fun_fact,
+                        }
+                      : null,
+                    celebrityPhoto: celebrityPhoto || undefined,
+                    photoPreview: photoPreview || undefined,
+                    analysisId: analysisId || undefined,
+                    creationMode,
+                    basePhoto: basePhoto || undefined,
+                    userHeightCm,
+                  })
+                }}
                 onSuccess={(_firstName, email, meta) => handleSignupComplete(email, meta)}
               />
             </motion.div>

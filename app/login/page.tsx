@@ -12,6 +12,8 @@ import { callFunction } from '@/lib/functions'
 import type { AccountData } from '@/lib/account'
 import { setStoredEmail, setStoredSessionId, clearStoredSession } from '@/lib/session-storage'
 import { supabase } from '@/lib/supabase'
+import GoogleAuthButton from '@/components/GoogleAuthButton'
+import { saveOAuthReturnContext } from '@/lib/oauth-return'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -124,6 +126,22 @@ export default function LoginPage() {
           <p className="text-[#808080] text-sm">
             Connecte-toi pour accéder à ton espace
           </p>
+        </div>
+
+        <div className="space-y-3">
+          <GoogleAuthButton
+            nextPath="/dashboard"
+            label="Continuer avec Google"
+            onBeforeRedirect={() => {
+              saveOAuthReturnContext({ intent: 'dashboard' })
+            }}
+            onError={setError}
+          />
+          <div className="flex items-center gap-3 py-1">
+            <div className="flex-1 h-px bg-white/10" />
+            <span className="text-[#505050] text-[11px] uppercase tracking-wider">ou</span>
+            <div className="flex-1 h-px bg-white/10" />
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
