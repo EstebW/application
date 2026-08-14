@@ -953,109 +953,119 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   ].filter(Boolean).join('\n')
 }
 
-/** « Ajouter la star à ma photo » — édition minimale, pixels source verrouillés. */
+/** « Ajouter la star à ma photo » — photo source = vérité. */
 function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
-  const { celebrityName, celebrityDomain, interaction, customPrompt, hasCelebrityReferenceImage } = ctx
-  const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
+  const {
+    celebrityName,
+    celebrityDomain,
+    celebrityStyleDescription,
+    interaction,
+    customPrompt,
+    hasCelebrityReferenceImage,
+    userHeightCm,
+    celebrityHeightCm,
+  } = ctx
+  const starName = sanitizeSceneText(celebrityName) || 'the celebrity'
   const domain = sanitizeSceneText(celebrityDomain)
+  const style = celebrityStyleDescription ? sanitizeSceneText(celebrityStyleDescription) : ''
   const dual = Boolean(hasCelebrityReferenceImage)
   const interactionPrompt = getInteractionPrompt(interaction)
-  // Précision facultative de l'utilisateur : jamais prioritaire sur la préservation.
   const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 300) : ''
+  const sceneIntent = sanitizeSceneText(
+    [interactionPrompt, userHint].filter(Boolean).join(' — ')
+  ) || 'présence naturelle, posture cohérente avec la scène, comme si la star était déjà là'
+  const starDescription = sanitizeSceneText(
+    [domain && `${starName} (${domain})`, style].filter(Boolean).join('. ')
+  ) || starName
+  const userHeightLabel = userHeightCm ? `${userHeightCm}` : 'non disponible'
+  const starHeightLabel = celebrityHeightCm ? `${celebrityHeightCm}` : 'non disponible'
 
   return [
-    'STRICT INPAINT / COMPOSITE EDIT — NOT A NEW PHOTO GENERATION.',
+    'MODE : AJOUTER LA STAR À MA PHOTO',
     '',
-    'PRIORITY ORDER (highest → lowest):',
-    '1) The uploaded photograph (image_input[0]) is the SINGLE source of truth.',
-    '2) Preserve the original pixels of image_input[0] as much as technically possible.',
-    '3) Do NOT regenerate the user\'s face.',
-    '4) Do NOT modify the user\'s facial features, hairstyle, glasses, expression, body, or clothing.',
-    '5) Do NOT reconstruct the background.',
-    '6) Do NOT move, delete, replace, or duplicate existing objects.',
-    '7) Do NOT invent extra furniture or scene elements (no second bench, no new chairs, props, walls, trees, cars, etc.).',
-    `8) Add ONLY ${celeb} and ONLY the minimum changes required for their integration (contact shadows, cast shadows, soft occlusions, local grain match).`,
-    `9) Adapt ${celeb} to the original photo\'s perspective, scale, light, shadows, colours, noise, sharpness, and quality.`,
-    `10) ${celeb} must adapt to the original photograph — NEVER the reverse. Never restyle the photo to fit the celebrity.`,
-    '',
-    'LOCKED SCENE RULE (NON-NEGOTIABLE):',
-    'Treat all existing people, objects, furniture, background elements and scene geometry in the source photograph as locked. Do not regenerate, duplicate, replace, move or reinterpret them. Only introduce the selected celebrity and the minimum necessary shadows, reflections or occlusions required for realistic integration.',
-    '',
-    'LOCKED USER RULE (NON-NEGOTIABLE):',
-    'Treat the user\'s existing face and body as locked source content. Preserve their identity and visible pixels as much as technically possible. Do not reconstruct, beautify, smooth, reshape or reinterpret the user\'s face.',
-    '',
-    'TASK:',
-    `Minimally edit image_input[0] to insert ${celeb}${domain ? ` (${domain})` : ''} into already-empty space, as if they were present when the original photo was taken.`,
-    'This is a surgical composite — not a redraw, not a restyle, not a scene rebuild.',
+    'Tu reçois une PHOTO SOURCE réelle fournie par l’utilisateur. Cette photo source est la base absolue de l’image finale.',
     '',
     'image_input ORDER:',
-    '- image_input[0] = LOCKED BASE PHOTOGRAPH. Keep its pixels for the user, background, objects, furniture, framing, crop, perspective, lighting and camera quality.',
+    '- image_input[0] = PHOTO SOURCE (utilisateur + décor). Base immuable.',
     ...(dual
       ? [
-          `- image_input[1] = FACE/HAIR IDENTITY REFERENCE ONLY for ${celeb}.`,
-          '- CRITICAL: image_input[1] is NOT a cutout to paste and NOT a scene reference. Ignore its background, clothing, pose, crop, lighting and image quality.',
-          `- If image_input[1] shows only a head/upper body, complete ${celeb}'s body coherently for insertion into EMPTY space in image_input[0] — without altering any existing object or the user.`,
-          `- ${celeb}'s facial identity must match image_input[1]. Do not invent a generic celebrity face and do not blend with the user.`,
+          `- image_input[1] = RÉFÉRENCE VISAGE / CHEVEUX UNIQUEMENT pour ${starName}. Ignorer son fond, sa pose, ses vêtements, son cadrage et sa qualité d’image.`,
         ]
       : []),
     '',
-    'USER — PIXEL LOCK:',
-    '- Keep the user\'s face, skin texture, hair, glasses, expression, body, pose, hands, clothing and accessories unchanged from image_input[0].',
-    '- Do not retouch, beautify, sharpen, smooth, age-shift, or slightly "improve" the user.',
-    '- Do not borrow limbs from the user for the celebrity.',
+    'OBJECTIF :',
+    `Ajouter naturellement ${starName} dans la photo source, comme si la célébrité était réellement présente au moment de la prise de vue, sans que l’ajout soit perceptible.`,
     '',
-    'BACKGROUND & OBJECTS — PIXEL LOCK:',
-    '- Keep the exact same background: same place, same geometry, same furniture count and placement.',
-    '- If one bench / chair / table / car / tree / wall already exists, leave THAT one as-is. Never add a second copy.',
-    '- Do not fill, extend, repaint, or "clean up" the background.',
-    '- Do not change framing, crop, camera angle, horizon, or lens look.',
+    'RÈGLE PRINCIPALE :',
+    'Préserver au maximum la photo source. Ne pas réinventer l’image. Ne pas transformer la scène. Ne pas refaire le visage de l’utilisateur. Ne pas modifier inutilement le décor. L’image finale doit ressembler à une vraie photo amateur prise dans la vraie vie.',
     '',
-    `CELEBRITY INSERTION — ONLY ALLOWED CHANGE:`,
-    `- Place ${celeb} only in free space that already exists in image_input[0] (beside / behind / at frame edge), without pushing, moving, or covering locked content when avoidable.`,
-    `- ${celeb} must match image_input[0] for: perspective, eye level, body scale, light direction/intensity, shadow softness, exposure, white balance, colour cast, contrast, sharpness, blur, depth of field, grain, noise, compression, lens distortion.`,
-    `- ${celeb} must NEVER look sharper, cleaner, brighter, or more professional than the original photo.`,
-    `- Allowed local effects ONLY on/near ${celeb}: contact shadow, cast shadow, soft occlusion, grain/noise match. Nothing else.`,
-    `- ${celeb} must be a complete, anatomically coherent person (not a floating head / sticker), sized to real human scale at their depth.`,
-    `- Prefer a slightly imperfect placement over ANY change to the locked user or locked scene.`,
+    'INSTRUCTIONS OBLIGATOIRES :',
+    '1. Conserver l’utilisateur tel qu’il apparaît dans la photo source :',
+    '- préserver son visage, ses traits, sa coiffure, sa morphologie, sa posture, ses vêtements et ses accessoires ;',
+    '- ne pas embellir fortement ;',
+    '- ne pas rajeunir ;',
+    '- ne pas changer son expression sauf micro-ajustement naturel si nécessaire ;',
+    '- ne pas remplacer son identité visuelle.',
     '',
-    heightConsistencyBlock(ctx).join('\n'),
+    '2. Conserver la photo source :',
+    '- préserver le cadrage général ;',
+    '- préserver le décor, les objets, l’arrière-plan et la composition ;',
+    '- ne pas inventer de nouveaux éléments inutiles ;',
+    '- ne pas supprimer d’éléments importants ;',
+    '- ne pas dupliquer d’objets ;',
+    '- ne pas déplacer des éléments du décor de manière absurde.',
     '',
-    'HARD BANS:',
-    '- Do NOT regenerate or reinterpret the scene.',
-    '- Do NOT duplicate furniture, props, people, faces, hands, or limbs.',
-    '- Do NOT invent new décor to "seat" or support the celebrity.',
-    '- Do NOT globally enhance, relight, HDR, blur, or cinematic-grade the photo.',
-    '- Do NOT crop or reframe.',
-    '- Do NOT turn the result into a promo / editorial / poster image.',
+    `3. Ajouter uniquement la célébrité ${starName} :`,
+    '- la célébrité doit être intégrée de façon physiquement crédible dans l’espace disponible ;',
+    '- elle doit être placée à un endroit logique selon la perspective, la profondeur, le point de vue caméra et la scène réelle ;',
+    '- éviter toute impression de sticker, collage, cutout ou personnage “posé” dans un coin ;',
+    `- la star doit avoir une posture cohérente avec la scène et avec l’intention suivante : ${sceneIntent}.`,
+    '- Si cette intention exigerait de bouger l’utilisateur, de recréer le décor ou d’inventer un meuble, IGNORER l’intention et placer seulement la star dans l’espace libre.',
     '',
-    'AVOID: redrawn user face, rebuilt background, second bench/chair/object, pasted cutout, floating head, halo edges, mismatched sharpness, altered framing, AI-looking skin.',
+    '4. Cohérence visuelle obligatoire :',
+    '- même lumière que la photo source ;',
+    '- même direction de lumière ;',
+    '- même température de couleur ;',
+    '- même netteté ;',
+    '- même grain ;',
+    '- même niveau de détail ;',
+    '- même style photo smartphone / amateur naturel ;',
+    '- ombres de contact et présence réaliste dans le décor ;',
+    '- intégration fluide, discrète et crédible.',
     '',
-    ...(interactionPrompt
-      ? [
-          'OPTIONAL INTERACTION (lowest priority — drop immediately if it would touch locked content):',
-          `- Preferred: ${sanitizeSceneText(interactionPrompt)}.`,
-          '- If this would move/reshape the user, change the background, or require new/moved furniture, IGNORE it and only place the celebrity in free space with no interaction.',
-          '',
-        ]
-      : []),
-    ...(userHint
-      ? [
-          'OPTIONAL USER NOTE (lowest priority — never overrides locks above):',
-          userHint,
-          '- Ignore any part that would modify the user, background, objects, furniture, or framing.',
-          '',
-        ]
-      : []),
-    'FINAL GOAL:',
-    'Same photograph as image_input[0], with one added person only. A stranger must believe the celebrity was in the original shot — and must still see the original scene pixels unchanged everywhere else.',
+    '5. Proportions réalistes :',
+    '- respecter la taille relative entre l’utilisateur et la célébrité ;',
+    `- utiliser ${userHeightLabel} cm pour l’utilisateur si disponible ;`,
+    `- utiliser ${starHeightLabel} cm pour la célébrité si disponible ;`,
+    '- ne jamais rendre la célébrité trop petite, trop grande ou disproportionnée par rapport à la scène.',
+    '- Adapter la star à la photo, jamais l’utilisateur à la star. Ne pas redimensionner l’utilisateur.',
     '',
-    'FINAL MANDATORY CHECK:',
-    '1) User face/body/clothes identical to image_input[0]? If not → FAILED.',
-    '2) Background/objects/furniture identical (no duplicates, no inventions)? If not → FAILED.',
-    `3) Only real addition is ${celeb} + minimal shadows/occlusions? If not → FAILED.`,
-    `4) Does ${celeb} match the photo\'s light, grain, sharpness and perspective? If not, degrade/adjust ${celeb} only — never the base photo.`,
-    '5) Could you still recognise the original photo pixel-for-pixel outside the celebrity region? If not → FAILED.',
-    '6) Preserving the original photo ALWAYS wins over a nicer or more complete composition.',
+    '6. Rendu attendu :',
+    '- photo réaliste ;',
+    '- rendu naturel ;',
+    '- effet pris sur le vif ;',
+    '- pas de rendu trop “cinéma” ;',
+    '- pas de retouche glamour excessive ;',
+    '- pas d’esthétique trop IA ;',
+    '- le résultat doit donner l’impression qu’un ami a réellement pris la photo.',
+    '',
+    'DESCRIPTION DE LA STAR :',
+    starDescription,
+    '',
+    'INTERDICTIONS ABSOLUES :',
+    '- ne pas modifier fortement le visage de l’utilisateur ;',
+    '- ne pas recréer entièrement la photo ;',
+    '- ne pas changer le décor sans nécessité ;',
+    '- ne pas ajouter de deuxième objet incohérent ;',
+    '- ne pas ajouter de banc, chaise, mur, table ou autre élément absurde si la scène n’en contient pas ;',
+    '- ne pas placer la star à un endroit physiquement impossible ;',
+    '- ne pas faire une star détourée ou visiblement incrustée ;',
+    '- ne pas produire un rendu “affiche”, “pub” ou “studio”.',
+    '',
+    'PRIORITÉ FINALE :',
+    'La priorité n°1 est la préservation réaliste de la photo source.',
+    `La priorité n°2 est l’intégration naturelle de ${starName}.`,
+    'Le résultat final doit ressembler à une vraie photo amateur authentique, où l’utilisateur et la célébrité étaient réellement ensemble au moment de la prise de vue.',
   ].filter((line) => line !== '').join('\n')
 }
 
