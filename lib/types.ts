@@ -105,4 +105,6 @@ export interface PhotoGenerationContext extends HeightContext {
   interaction?: string
   /** true si une vraie photo de la célébrité est fournie en 2e image_input (mode "Choisis ta star") */
   hasCelebrityReferenceImage?: boolean
+  /** photo_edit : placement précis issu de l'analyse de composition */
+  celebrityPlacementInstruction?: string
 }

@@ -60,6 +60,11 @@ const KIE_FILE_API_BASE = 'https://kieai.redpandaai.co'
 const POLL_INTERVAL_MS = 3000
 const POLL_TIMEOUT_MS = 90_000
 const GENERATION_CREDIT_COST = 1
+const COMPOSITION_MODEL = 'gemini-3-flash'
+const COMPOSITION_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
+const COMPOSITION_TEMPERATURE = 0.2
+const TEMP_SIGNED_URL_TTL_SEC = 300
+const PHOTO_EDIT_PROMPT_MAX_CHARS = 5000
 
 /** Les erreurs Postgrest/Supabase sont des objets simples, pas des `Error` — sans
  *  ça, `err instanceof Error` échoue et masque le vrai message derrière "Erreur interne". */
@@ -105,6 +110,11 @@ function getMime(base64: string) {
   return 'image/jpeg'
 }
 
+function toDataUrl(base64: string): string {
+  if (base64.startsWith('data:')) return base64
+  return `data:${getMime(base64)};base64,${stripDataUrl(base64)}`
+}
+
 function getExt(mime: string) {
   if (mime === 'image/png') return 'png'
   if (mime === 'image/webp') return 'webp'
@@ -136,6 +146,8 @@ interface PhotoGenerationContext {
   customPrompt?: string
   interaction?: string
   hasCelebrityReferenceImage?: boolean
+  /** photo_edit : placement précis issu de l'analyse de composition */
+  celebrityPlacementInstruction?: string
   /** Parcours « Choisis ta star » uniquement — absent = aucune contrainte de taille */
   userHeightCm?: number
   celebrityHeightCm?: number | null
@@ -953,6 +965,165 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   ].filter(Boolean).join('\n')
 }
 
+/** Verrouillage source photo_edit — plus strict que facePreservationBlock (full_generation). */
+function sourceLockBlock(starName: string, dual: boolean): string[] {
+  const celeb = sanitizeSceneText(starName) || 'the celebrity'
+  return [
+    'SOURCE LOCK (NON-NEGOTIABLE — photo_edit):',
+    'The first input image is the locked source photograph. Preserve it.',
+    'USER = IMMUTABLE: do not redraw, beautify, restyle, re-pose, crop, or replace the existing person. Keep face, hair, body, pose, clothes and accessories exactly as photographed.',
+    'SCENE = IMMUTABLE: do not add, delete, move, duplicate or rebuild background, furniture, objects, walls or geometry. Keep the original framing and crop.',
+    `ALLOWED CHANGE ONLY: insert ${celeb} plus indispensable contact/cast shadows, reflections and local occlusions on/near ${celeb}.`,
+    dual
+      ? `The second input image is FACE/HAIR IDENTITY REFERENCE ONLY for ${celeb}. Ignore and do not copy its pose, clothing, crop, lighting, background or image quality.`
+      : '',
+    'If a nicer composition would require moving the user or changing the scene, keep the locked source and a simpler placement.',
+  ].filter((line) => line !== '')
+}
+
+function extractTextFromResponse(data: unknown): string {
+  if (!data || typeof data !== 'object') return ''
+  const d = data as Record<string, unknown>
+  const choices = d.choices as Array<{ message?: { content?: string } }> | undefined
+  if (choices?.[0]?.message?.content) return choices[0].message.content
+  if (typeof d.text === 'string') return d.text
+  if (d.data && typeof d.data === 'object') return extractTextFromResponse(d.data)
+  return ''
+}
+
+function extractJsonObject(text: string): Record<string, unknown> {
+  const cleaned = text.trim()
+  try {
+    return JSON.parse(cleaned) as Record<string, unknown>
+  } catch { /* continue */ }
+  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1].trim()) as Record<string, unknown>
+    } catch { /* continue */ }
+  }
+  const start = cleaned.indexOf('{')
+  const end = cleaned.lastIndexOf('}')
+  if (start >= 0 && end > start) {
+    return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>
+  }
+  throw new Error('Impossible de parser la réponse du modèle')
+}
+
+async function callCompositionVision(messages: unknown[], apiKey: string): Promise<string> {
+  const res = await fetch(`${KIE_API_BASE}${COMPOSITION_ENDPOINT}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messages,
+      stream: false,
+      reasoning_effort: 'medium',
+      temperature: COMPOSITION_TEMPERATURE,
+    }),
+  })
+
+  const bodyText = await res.text()
+  let data: unknown
+  try {
+    data = JSON.parse(bodyText)
+  } catch {
+    throw new Error(`kie.ai ${COMPOSITION_MODEL} ${res.status} — ${bodyText}`)
+  }
+
+  if (!res.ok) {
+    const err = data as { error?: { message?: string }; msg?: string }
+    throw new Error(`kie.ai ${COMPOSITION_MODEL} ${res.status} — ${err.error?.message ?? err.msg ?? bodyText}`)
+  }
+
+  const parsed = data as { code?: number; msg?: string }
+  if (typeof parsed.code === 'number' && parsed.code !== 200) {
+    throw new Error(`kie.ai ${COMPOSITION_MODEL} — ${parsed.msg ?? 'erreur'}`)
+  }
+
+  const raw = extractTextFromResponse(data)
+  if (!raw) throw new Error('Réponse vide du modèle de composition')
+  return raw
+}
+
+type CompositionAnalysis =
+  | { suitable: true; celebrityPlacementInstruction: string }
+  | { suitable: false }
+
+function parseCompositionResult(raw: Record<string, unknown>): CompositionAnalysis {
+  if (raw.suitable === false || raw.reason === 'SOURCE_PHOTO_UNSUITABLE') {
+    return { suitable: false }
+  }
+  const instruction = typeof raw.celebrityPlacementInstruction === 'string'
+    ? sanitizeSceneText(raw.celebrityPlacementInstruction).slice(0, 400)
+    : ''
+  if (raw.suitable === true && instruction) {
+    return { suitable: true, celebrityPlacementInstruction: instruction }
+  }
+  throw new Error('Analyse de composition invalide')
+}
+
+async function analyzePhotoEditComposition(
+  imageBase64: string,
+  ctx: PhotoGenerationContext,
+  apiKey: string,
+): Promise<CompositionAnalysis> {
+  const starName = sanitizeSceneText(ctx.celebrityName) || 'the celebrity'
+  const interactionPrompt = getInteractionPrompt(ctx.interaction)
+  const userHint = ctx.customPrompt ? sanitizeSceneText(ctx.customPrompt).slice(0, 200) : ''
+  const sceneIntent = sanitizeSceneText(
+    [interactionPrompt, userHint].filter(Boolean).join(' — ')
+  ) || 'présence naturelle, comme si la star était déjà là'
+
+  const messages = [
+    {
+      role: 'system',
+      content:
+        'Tu analyses UNE photo source pour décider si une deuxième personne réelle peut y être ajoutée sans déplacer l’utilisateur ni reconstruire le décor. Réponds UNIQUEMENT en JSON.',
+    },
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: [
+            `Analyse la PHOTO SOURCE. La célébrité à ajouter s’appelle ${starName}.`,
+            'Détermine : position de l’utilisateur ; orientation et posture ; cadrage ; perspective ; profondeur ; plan du sol / supports visibles ; objets importants ; zones réellement disponibles pour une deuxième personne ; placement et posture plausibles de la célébrité.',
+            `Intention utilisateur (à ignorer si elle exige de bouger l’utilisateur ou d’inventer un meuble) : ${sceneIntent}`,
+            'Ne jamais proposer de déplacer, recadrer ou modifier l’utilisateur. Ne jamais inventer de banc, chaise, mur, table ou support absent. Le placement doit être physiquement possible dans l’espace déjà visible.',
+            'Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité assise sur le muret à droite, légèrement derrière l’utilisateur, même profondeur et même perspective, cadrée à partir des cuisses"}',
+            'Si aucune intégration crédible n’est possible sans déplacer l’utilisateur ou reconstruire fortement le décor : {"suitable":false,"reason":"SOURCE_PHOTO_UNSUITABLE"}',
+          ].join('\n'),
+        },
+        { type: 'image_url', image_url: { url: toDataUrl(imageBase64) } },
+      ],
+    },
+  ]
+
+  try {
+    const parsed = parseCompositionResult(extractJsonObject(await callCompositionVision(messages, apiKey)))
+    console.log('[generate] composition:', JSON.stringify(parsed))
+    return parsed
+  } catch (firstErr) {
+    const retryMessages = [
+      ...messages,
+      {
+        role: 'user',
+        content: 'Ta réponse précédente était invalide. Renvoie UNIQUEMENT l’objet JSON demandé, sans markdown ni texte autour.',
+      },
+    ]
+    try {
+      const parsed = parseCompositionResult(extractJsonObject(await callCompositionVision(retryMessages, apiKey)))
+      console.log('[generate] composition retry:', JSON.stringify(parsed))
+      return parsed
+    } catch {
+      throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
+    }
+  }
+}
+
 /** « Ajouter la star à ma photo » — photo source = vérité. */
 function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   const {
@@ -962,6 +1133,7 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     interaction,
     customPrompt,
     hasCelebrityReferenceImage,
+    celebrityPlacementInstruction,
     userHeightCm,
     celebrityHeightCm,
   } = ctx
@@ -979,25 +1151,27 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   ) || starName
   const userHeightLabel = userHeightCm ? `${userHeightCm}` : 'non disponible'
   const starHeightLabel = celebrityHeightCm ? `${celebrityHeightCm}` : 'non disponible'
+  const placement = celebrityPlacementInstruction
+    ? sanitizeSceneText(celebrityPlacementInstruction)
+    : ''
 
-  return [
+  const prompt = [
     'MODE : AJOUTER LA STAR À MA PHOTO',
+    '',
+    ...sourceLockBlock(starName, dual),
     '',
     'Tu reçois une PHOTO SOURCE réelle fournie par l’utilisateur. Cette photo source est la base absolue de l’image finale.',
     '',
-    'image_input ORDER:',
-    '- image_input[0] = PHOTO SOURCE (utilisateur + décor). Base immuable.',
+    'IMAGE ORDER:',
+    '- First image = PHOTO SOURCE (utilisateur + décor). Base immuable.',
     ...(dual
       ? [
-          `- image_input[1] = RÉFÉRENCE VISAGE / CHEVEUX UNIQUEMENT pour ${starName}. Ignorer son fond, sa pose, ses vêtements, son cadrage et sa qualité d’image.`,
+          `- Second image = RÉFÉRENCE VISAGE / CHEVEUX UNIQUEMENT pour ${starName}. Ignorer son fond, sa pose, ses vêtements, son cadrage et sa qualité d’image.`,
         ]
       : []),
     '',
     'OBJECTIF :',
     `Ajouter naturellement ${starName} dans la photo source, comme si la célébrité était réellement présente au moment de la prise de vue, sans que l’ajout soit perceptible.`,
-    '',
-    'RÈGLE PRINCIPALE :',
-    'Préserver au maximum la photo source. Ne pas réinventer l’image. Ne pas transformer la scène. Ne pas refaire le visage de l’utilisateur. Ne pas modifier inutilement le décor. L’image finale doit ressembler à une vraie photo amateur prise dans la vraie vie.',
     '',
     'INSTRUCTIONS OBLIGATOIRES :',
     '1. Conserver l’utilisateur tel qu’il apparaît dans la photo source :',
@@ -1016,38 +1190,30 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '- ne pas déplacer des éléments du décor de manière absurde.',
     '',
     `3. Ajouter uniquement la célébrité ${starName} :`,
-    '- la célébrité doit être intégrée de façon physiquement crédible dans l’espace disponible ;',
-    '- elle doit être placée à un endroit logique selon la perspective, la profondeur, le point de vue caméra et la scène réelle ;',
+    ...(placement
+      ? [
+          'PLACEMENT OBLIGATOIRE (analyse de composition — unique consigne de placement) :',
+          placement,
+          '- Ne pas substituer cette instruction par un placement générique dans un espace vide.',
+          `- Si l’intention suivante entre en conflit, suivre le placement analysé : ${sceneIntent}.`,
+        ]
+      : [
+          `- la star doit avoir une posture cohérente avec la scène et avec l’intention suivante : ${sceneIntent}.`,
+          '- Si cette intention exigerait de bouger l’utilisateur, de recréer le décor ou d’inventer un meuble, IGNORER l’intention.',
+        ]),
     '- éviter toute impression de sticker, collage, cutout ou personnage “posé” dans un coin ;',
-    `- la star doit avoir une posture cohérente avec la scène et avec l’intention suivante : ${sceneIntent}.`,
-    '- Si cette intention exigerait de bouger l’utilisateur, de recréer le décor ou d’inventer un meuble, IGNORER l’intention et placer seulement la star dans l’espace libre.',
     '',
     '4. Cohérence visuelle obligatoire :',
-    '- même lumière que la photo source ;',
-    '- même direction de lumière ;',
-    '- même température de couleur ;',
-    '- même netteté ;',
-    '- même grain ;',
-    '- même niveau de détail ;',
-    '- même style photo smartphone / amateur naturel ;',
+    '- même lumière, direction de lumière, température, netteté, grain, détail et style smartphone amateur que la photo source ;',
     '- ombres de contact et présence réaliste dans le décor ;',
     '- intégration fluide, discrète et crédible.',
     '',
     '5. Proportions réalistes :',
-    '- respecter la taille relative entre l’utilisateur et la célébrité ;',
-    `- utiliser ${userHeightLabel} cm pour l’utilisateur si disponible ;`,
-    `- utiliser ${starHeightLabel} cm pour la célébrité si disponible ;`,
-    '- ne jamais rendre la célébrité trop petite, trop grande ou disproportionnée par rapport à la scène.',
-    '- Adapter la star à la photo, jamais l’utilisateur à la star. Ne pas redimensionner l’utilisateur.',
+    `- utilisateur ${userHeightLabel} cm si disponible ; célébrité ${starHeightLabel} cm si disponible ;`,
+    '- ne jamais rendre la célébrité trop petite, trop grande ou disproportionnée.',
+    '- Adapter la star à la photo, jamais l’utilisateur à la star.',
     '',
-    '6. Rendu attendu :',
-    '- photo réaliste ;',
-    '- rendu naturel ;',
-    '- effet pris sur le vif ;',
-    '- pas de rendu trop “cinéma” ;',
-    '- pas de retouche glamour excessive ;',
-    '- pas d’esthétique trop IA ;',
-    '- le résultat doit donner l’impression qu’un ami a réellement pris la photo.',
+    '6. Rendu attendu : photo réaliste amateur prise sur le vif, pas cinéma, pas glamour, pas esthétique IA.',
     '',
     'DESCRIPTION DE LA STAR :',
     starDescription,
@@ -1056,17 +1222,19 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '- ne pas modifier fortement le visage de l’utilisateur ;',
     '- ne pas recréer entièrement la photo ;',
     '- ne pas changer le décor sans nécessité ;',
-    '- ne pas ajouter de deuxième objet incohérent ;',
-    '- ne pas ajouter de banc, chaise, mur, table ou autre élément absurde si la scène n’en contient pas ;',
+    '- ne pas ajouter de deuxième objet incohérent, ni banc/chaise/mur/table absents de la scène ;',
     '- ne pas placer la star à un endroit physiquement impossible ;',
-    '- ne pas faire une star détourée ou visiblement incrustée ;',
-    '- ne pas produire un rendu “affiche”, “pub” ou “studio”.',
+    '- ne pas faire une star détourée, incrustée, affiche, pub ou studio.',
     '',
     'PRIORITÉ FINALE :',
     'La priorité n°1 est la préservation réaliste de la photo source.',
     `La priorité n°2 est l’intégration naturelle de ${starName}.`,
-    'Le résultat final doit ressembler à une vraie photo amateur authentique, où l’utilisateur et la célébrité étaient réellement ensemble au moment de la prise de vue.',
   ].filter((line) => line !== '').join('\n')
+
+  if (prompt.length > PHOTO_EDIT_PROMPT_MAX_CHARS) {
+    console.warn('[generate] photo_edit prompt length', prompt.length)
+  }
+  return prompt
 }
 
 function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
@@ -1090,7 +1258,7 @@ function extractUploadUrl(data: {
   return data?.fileUrl ?? data?.downloadUrl
 }
 
-async function uploadToSupabaseStorage(imageBase64: string): Promise<string | null> {
+async function uploadToSupabaseStorage(imageBase64: string): Promise<{ path: string; signedUrl: string } | null> {
   const url = Deno.env.get('SUPABASE_URL')
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   if (!url || !key) return null
@@ -1112,11 +1280,34 @@ async function uploadToSupabaseStorage(imageBase64: string): Promise<string | nu
       return null
     }
 
-    const { data } = db.storage.from('temp-images').getPublicUrl(path)
-    return data.publicUrl
+    const { data: signed, error: signErr } = await db.storage
+      .from('temp-images')
+      .createSignedUrl(path, TEMP_SIGNED_URL_TTL_SEC)
+
+    if (signErr || !signed?.signedUrl) {
+      console.warn('[generate] signed URL failed:', signErr?.message ?? 'missing url')
+      await db.storage.from('temp-images').remove([path])
+      return null
+    }
+
+    return { path, signedUrl: signed.signedUrl }
   } catch (err) {
     console.warn('[generate] Supabase storage upload error:', err)
     return null
+  }
+}
+
+async function removeTempObjects(paths: string[]): Promise<void> {
+  if (paths.length === 0) return
+  const url = Deno.env.get('SUPABASE_URL')
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!url || !key) return
+  try {
+    const db = createClient(url, key, { auth: { persistSession: false } })
+    const { error } = await db.storage.from('temp-images').remove(paths)
+    if (error) console.warn('[generate] temp cleanup failed:', error.message)
+  } catch (err) {
+    console.warn('[generate] temp cleanup error:', err)
   }
 }
 
@@ -1195,15 +1386,27 @@ async function uploadBase64ToKie(imageBase64: string, apiKey: string): Promise<s
   return imageUrl
 }
 
-async function resolveReferenceImageUrl(imageBase64: string, apiKey: string): Promise<string> {
-  const publicUrl = await uploadToSupabaseStorage(imageBase64)
-  if (publicUrl) {
-    const kieUrl = await uploadUrlToKie(publicUrl, apiKey)
+async function resolveReferenceImageUrl(
+  imageBase64: string,
+  apiKey: string,
+  tempPaths: string[],
+): Promise<string> {
+  const uploaded = await uploadToSupabaseStorage(imageBase64)
+  if (uploaded) {
+    tempPaths.push(uploaded.path)
+    const kieUrl = await uploadUrlToKie(uploaded.signedUrl, apiKey)
+    await removeTempObjects([uploaded.path])
+    const idx = tempPaths.indexOf(uploaded.path)
+    if (idx >= 0) tempPaths.splice(idx, 1)
     if (kieUrl) return kieUrl
-    return publicUrl
   }
 
   return uploadBase64ToKie(imageBase64, apiKey)
+}
+
+function resolvePhotoEditModel(): 'nano-banana-2' | 'google/nano-banana-edit' {
+  const raw = (Deno.env.get('PHOTO_EDIT_KIE_MODEL') ?? 'google/nano-banana-edit').trim()
+  return raw === 'nano-banana-2' ? 'nano-banana-2' : 'google/nano-banana-edit'
 }
 
 async function createTask(
@@ -1212,7 +1415,32 @@ async function createTask(
   apiKey: string
 ): Promise<string> {
   const prompt = buildPhotoPrompt(ctx)
-  console.log('[nano-banana-2] prompt:', prompt)
+  const useEditModel =
+    ctx.creationMode === 'photo_edit' && resolvePhotoEditModel() === 'google/nano-banana-edit'
+
+  const payload = useEditModel
+    ? {
+        model: 'google/nano-banana-edit',
+        input: {
+          prompt,
+          image_urls: imageUrls,
+          aspect_ratio: 'auto',
+          output_format: 'jpeg',
+        },
+      }
+    : {
+        model: 'nano-banana-2',
+        input: {
+          prompt,
+          image_input: imageUrls,
+          aspect_ratio: 'auto',
+          resolution: '2K',
+          output_format: 'jpg',
+        },
+      }
+
+  console.log(`[generate] createTask model=${payload.model} photo_edit=${ctx.creationMode === 'photo_edit'}`)
+  console.log(`[${payload.model}] prompt:`, prompt)
 
   const res = await fetch(`${KIE_API_BASE}/api/v1/jobs/createTask`, {
     method: 'POST',
@@ -1220,16 +1448,7 @@ async function createTask(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: 'nano-banana-2',
-      input: {
-        prompt,
-        image_input: imageUrls,
-        aspect_ratio: 'auto',
-        resolution: '2K',
-        output_format: 'jpg',
-      },
-    }),
+    body: JSON.stringify(payload),
   })
 
   const json = await res.json() as { code: number; msg: string; data?: { taskId: string } }
@@ -1389,6 +1608,20 @@ Deno.serve(async (req: Request) => {
       userHeightCm,
     }
 
+    if (creationMode === 'photo_edit') {
+      const composition = await analyzePhotoEditComposition(imageBase64, generationContext, kieKey)
+      if (!composition.suitable) {
+        return new Response(
+          JSON.stringify({
+            error: 'Cette photo ne permet pas d’ajouter la star de façon naturelle sans modifier la scène. Choisis une photo avec un peu plus d’espace autour de toi.',
+            code: 'SOURCE_PHOTO_UNSUITABLE',
+          }),
+          { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } }
+        )
+      }
+      generationContext.celebrityPlacementInstruction = composition.celebrityPlacementInstruction
+    }
+
     const sceneSummary = buildSceneSummary(generationContext)
 
     const db = createClient(
@@ -1500,11 +1733,12 @@ Deno.serve(async (req: Request) => {
     }
 
     let generatedBase64: string
+    const tempPaths: string[] = []
     try {
-      const imageUrl = await resolveReferenceImageUrl(imageBase64, kieKey)
+      const imageUrl = await resolveReferenceImageUrl(imageBase64, kieKey, tempPaths)
       const imageUrls = [imageUrl]
       if (celebrityImageBase64) {
-        imageUrls.push(await resolveReferenceImageUrl(celebrityImageBase64, kieKey))
+        imageUrls.push(await resolveReferenceImageUrl(celebrityImageBase64, kieKey, tempPaths))
       }
       const taskId = await createTask(imageUrls, generationContext, kieKey)
       const resultUrl = await pollTask(taskId, kieKey)
@@ -1546,6 +1780,8 @@ Deno.serve(async (req: Request) => {
         }
       }
       throw genErr
+    } finally {
+      await removeTempObjects(tempPaths)
     }
 
     let generationId: string | undefined

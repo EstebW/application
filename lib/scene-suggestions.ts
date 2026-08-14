@@ -419,6 +419,24 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
 }
 
 /**
+ * Verrouillage source photo_edit — plus strict que facePreservationBlock (full_generation).
+ */
+function sourceLockBlock(starName: string, dual: boolean): string[] {
+  const celeb = starName
+  return [
+    'SOURCE LOCK (NON-NEGOTIABLE — photo_edit):',
+    'The first input image is the locked source photograph. Preserve it.',
+    'USER = IMMUTABLE: do not redraw, beautify, restyle, re-pose, crop, or replace the existing person. Keep face, hair, body, pose, clothes and accessories exactly as photographed.',
+    'SCENE = IMMUTABLE: do not add, delete, move, duplicate or rebuild background, furniture, objects, walls or geometry. Keep the original framing and crop.',
+    `ALLOWED CHANGE ONLY: insert ${celeb} plus indispensable contact/cast shadows, reflections and local occlusions on/near ${celeb}.`,
+    dual
+      ? `The second input image is FACE/HAIR IDENTITY REFERENCE ONLY for ${celeb}. Ignore and do not copy its pose, clothing, crop, lighting, background or image quality.`
+      : '',
+    'If a nicer composition would require moving the user or changing the scene, keep the locked source and a simpler placement.',
+  ].filter((line) => line !== '')
+}
+
+/**
  * Prompt « Ajouter la star à ma photo » — photo source = vérité.
  * Ne pas assouplir : toute régénération de visage / décor est un échec.
  */
@@ -430,6 +448,7 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     interaction,
     customPrompt,
     hasCelebrityReferenceImage,
+    celebrityPlacementInstruction,
     userHeightCm,
     celebrityHeightCm,
   } = ctx
@@ -447,25 +466,27 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   ) || starName
   const userHeightLabel = userHeightCm ? `${userHeightCm}` : 'non disponible'
   const starHeightLabel = celebrityHeightCm ? `${celebrityHeightCm}` : 'non disponible'
+  const placement = celebrityPlacementInstruction
+    ? sanitizeSceneText(celebrityPlacementInstruction)
+    : ''
 
   return [
     'MODE : AJOUTER LA STAR À MA PHOTO',
     '',
+    ...sourceLockBlock(starName, dual),
+    '',
     'Tu reçois une PHOTO SOURCE réelle fournie par l’utilisateur. Cette photo source est la base absolue de l’image finale.',
     '',
-    'image_input ORDER:',
-    '- image_input[0] = PHOTO SOURCE (utilisateur + décor). Base immuable.',
+    'IMAGE ORDER:',
+    '- First image = PHOTO SOURCE (utilisateur + décor). Base immuable.',
     ...(dual
       ? [
-          `- image_input[1] = RÉFÉRENCE VISAGE / CHEVEUX UNIQUEMENT pour ${starName}. Ignorer son fond, sa pose, ses vêtements, son cadrage et sa qualité d’image.`,
+          `- Second image = RÉFÉRENCE VISAGE / CHEVEUX UNIQUEMENT pour ${starName}. Ignorer son fond, sa pose, ses vêtements, son cadrage et sa qualité d’image.`,
         ]
       : []),
     '',
     'OBJECTIF :',
     `Ajouter naturellement ${starName} dans la photo source, comme si la célébrité était réellement présente au moment de la prise de vue, sans que l’ajout soit perceptible.`,
-    '',
-    'RÈGLE PRINCIPALE :',
-    'Préserver au maximum la photo source. Ne pas réinventer l’image. Ne pas transformer la scène. Ne pas refaire le visage de l’utilisateur. Ne pas modifier inutilement le décor. L’image finale doit ressembler à une vraie photo amateur prise dans la vraie vie.',
     '',
     'INSTRUCTIONS OBLIGATOIRES :',
     '1. Conserver l’utilisateur tel qu’il apparaît dans la photo source :',
@@ -484,38 +505,30 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '- ne pas déplacer des éléments du décor de manière absurde.',
     '',
     `3. Ajouter uniquement la célébrité ${starName} :`,
-    '- la célébrité doit être intégrée de façon physiquement crédible dans l’espace disponible ;',
-    '- elle doit être placée à un endroit logique selon la perspective, la profondeur, le point de vue caméra et la scène réelle ;',
+    ...(placement
+      ? [
+          'PLACEMENT OBLIGATOIRE (analyse de composition — unique consigne de placement) :',
+          placement,
+          '- Ne pas substituer cette instruction par un placement générique dans un espace vide.',
+          `- Si l’intention suivante entre en conflit, suivre le placement analysé : ${sceneIntent}.`,
+        ]
+      : [
+          `- la star doit avoir une posture cohérente avec la scène et avec l’intention suivante : ${sceneIntent}.`,
+          '- Si cette intention exigerait de bouger l’utilisateur, de recréer le décor ou d’inventer un meuble, IGNORER l’intention.',
+        ]),
     '- éviter toute impression de sticker, collage, cutout ou personnage “posé” dans un coin ;',
-    `- la star doit avoir une posture cohérente avec la scène et avec l’intention suivante : ${sceneIntent}.`,
-    '- Si cette intention exigerait de bouger l’utilisateur, de recréer le décor ou d’inventer un meuble, IGNORER l’intention et placer seulement la star dans l’espace libre.',
     '',
     '4. Cohérence visuelle obligatoire :',
-    '- même lumière que la photo source ;',
-    '- même direction de lumière ;',
-    '- même température de couleur ;',
-    '- même netteté ;',
-    '- même grain ;',
-    '- même niveau de détail ;',
-    '- même style photo smartphone / amateur naturel ;',
+    '- même lumière, direction de lumière, température, netteté, grain, détail et style smartphone amateur que la photo source ;',
     '- ombres de contact et présence réaliste dans le décor ;',
     '- intégration fluide, discrète et crédible.',
     '',
     '5. Proportions réalistes :',
-    '- respecter la taille relative entre l’utilisateur et la célébrité ;',
-    `- utiliser ${userHeightLabel} cm pour l’utilisateur si disponible ;`,
-    `- utiliser ${starHeightLabel} cm pour la célébrité si disponible ;`,
-    '- ne jamais rendre la célébrité trop petite, trop grande ou disproportionnée par rapport à la scène.',
-    '- Adapter la star à la photo, jamais l’utilisateur à la star. Ne pas redimensionner l’utilisateur.',
+    `- utilisateur ${userHeightLabel} cm si disponible ; célébrité ${starHeightLabel} cm si disponible ;`,
+    '- ne jamais rendre la célébrité trop petite, trop grande ou disproportionnée.',
+    '- Adapter la star à la photo, jamais l’utilisateur à la star.',
     '',
-    '6. Rendu attendu :',
-    '- photo réaliste ;',
-    '- rendu naturel ;',
-    '- effet pris sur le vif ;',
-    '- pas de rendu trop “cinéma” ;',
-    '- pas de retouche glamour excessive ;',
-    '- pas d’esthétique trop IA ;',
-    '- le résultat doit donner l’impression qu’un ami a réellement pris la photo.',
+    '6. Rendu attendu : photo réaliste amateur prise sur le vif, pas cinéma, pas glamour, pas esthétique IA.',
     '',
     'DESCRIPTION DE LA STAR :',
     starDescription,
@@ -524,16 +537,13 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '- ne pas modifier fortement le visage de l’utilisateur ;',
     '- ne pas recréer entièrement la photo ;',
     '- ne pas changer le décor sans nécessité ;',
-    '- ne pas ajouter de deuxième objet incohérent ;',
-    '- ne pas ajouter de banc, chaise, mur, table ou autre élément absurde si la scène n’en contient pas ;',
+    '- ne pas ajouter de deuxième objet incohérent, ni banc/chaise/mur/table absents de la scène ;',
     '- ne pas placer la star à un endroit physiquement impossible ;',
-    '- ne pas faire une star détourée ou visiblement incrustée ;',
-    '- ne pas produire un rendu “affiche”, “pub” ou “studio”.',
+    '- ne pas faire une star détourée, incrustée, affiche, pub ou studio.',
     '',
     'PRIORITÉ FINALE :',
     'La priorité n°1 est la préservation réaliste de la photo source.',
     `La priorité n°2 est l’intégration naturelle de ${starName}.`,
-    'Le résultat final doit ressembler à une vraie photo amateur authentique, où l’utilisateur et la célébrité étaient réellement ensemble au moment de la prise de vue.',
   ].filter((line) => line !== '').join('\n')
 }
 
