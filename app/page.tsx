@@ -171,10 +171,12 @@ export default function HomePage() {
   const [unlimitedAccess, setUnlimitedAccess] = useState(false)
   const [userId, setUserId] = useState<string | undefined>()
   const [userEmail, setUserEmail] = useState<string | undefined>()
+  const [userFirstName, setUserFirstName] = useState<string | null>(null)
   const sessionInitialized = useRef(false)
 
   const applyAccountFlags = useCallback((data: AccountData) => {
     setCreditsBalance(data.creditsBalance)
+    setUserFirstName(data.firstName?.trim() || null)
     const unlimited = accountHasUnlimitedAccess(data)
     setUnlimitedAccess(unlimited)
     if (unlimited) setHasUnlocked(true)
@@ -258,6 +260,7 @@ export default function HomePage() {
         setUserId(undefined)
         setUnlimitedAccess(false)
         setHasUnlocked(false)
+        setUserFirstName(null)
       }
     })
     return () => subscription.unsubscribe()
@@ -725,10 +728,10 @@ export default function HomePage() {
               href="/dashboard"
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex-shrink-0 max-w-[160px]"
               style={{ background: 'rgba(212,175,55,0.1)', border: '1px solid rgba(212,175,55,0.3)', color: '#D4AF37' }}
-              title={userEmail ?? 'Mon espace'}
+              title={userFirstName || userEmail || 'Mon espace'}
             >
               <LayoutDashboard size={13} className="flex-shrink-0" />
-              <span className="truncate">{userEmail ? userEmail.split('@')[0] : 'Mon espace'}</span>
+              <span className="truncate">{userFirstName || 'Mon espace'}</span>
             </Link>
           ) : (
             <Link

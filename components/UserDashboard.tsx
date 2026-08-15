@@ -461,7 +461,7 @@ export default function UserDashboard() {
                   </button>
                 </div>
               )}
-              <p className="text-white/80 font-semibold text-sm break-all mt-2.5">
+              <p className="text-[#808080] text-xs break-all mt-2.5">
                 {account.email ?? 'Membre'}
               </p>
             </div>
