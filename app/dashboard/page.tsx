@@ -19,7 +19,9 @@ export default function DashboardPage() {
             >
               <ArrowLeft size={15} className="text-[#A0A0A0]" />
             </Link>
-            <StarFusionLogo variant="duo" size="navbar" />
+            <Link href="/" aria-label="Retour à l'accueil" className="min-w-0">
+              <StarFusionLogo variant="duo" size="navbar" />
+            </Link>
           </div>
         </div>
       </header>

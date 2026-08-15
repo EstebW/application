@@ -707,14 +707,17 @@ export default function HomePage() {
               )}
             </AnimatePresence>
 
-            <motion.div
+            <motion.button
+              type="button"
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
-              className="min-w-0"
+              onClick={handleReset}
+              aria-label="Retour à l'accueil"
+              className="min-w-0 text-left"
             >
               <StarFusionLogo variant="duo" size="navbar" />
-            </motion.div>
+            </motion.button>
           </div>
 
           {userId ? (
