@@ -16,6 +16,9 @@ import {
   ChevronDown,
   ExternalLink,
   Settings2,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react'
 import { callFunction } from '@/lib/functions'
 import type { AccountData } from '@/lib/account'
@@ -103,6 +106,10 @@ export default function UserDashboard() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [portalLoading, setPortalLoading] = useState(false)
   const [portalError, setPortalError] = useState('')
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
+  const [nameSaving, setNameSaving] = useState(false)
+  const [nameError, setNameError] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -204,6 +211,42 @@ export default function UserDashboard() {
     clearStoredSession()
     await signOut()
     router.push('/')
+  }
+
+  const startEditName = () => {
+    setNameDraft(account?.firstName ?? '')
+    setNameError('')
+    setEditingName(true)
+  }
+
+  const cancelEditName = () => {
+    setEditingName(false)
+    setNameError('')
+    setNameDraft('')
+  }
+
+  const saveProfileName = async () => {
+    if (!account) return
+    const next = nameDraft.replace(/\s+/g, ' ').trim()
+    if (next.length > 40) {
+      setNameError('Le nom doit faire au plus 40 caractères')
+      return
+    }
+    setNameSaving(true)
+    setNameError('')
+    try {
+      const data = await callFunction<{ success?: boolean; firstName?: string | null; error?: string }>(
+        'account',
+        { action: 'updateProfile', firstName: next },
+      )
+      if (data.error) throw new Error(data.error)
+      setAccount((prev) => prev ? { ...prev, firstName: data.firstName ?? null } : prev)
+      setEditingName(false)
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : 'Impossible d’enregistrer le nom')
+    } finally {
+      setNameSaving(false)
+    }
   }
 
   const openPortal = async () => {
@@ -338,10 +381,87 @@ export default function UserDashboard() {
           {/* Gauche — identité & abonnement */}
           <div className="min-w-0 flex-1 space-y-2.5">
             <div>
-              {account.firstName && (
-                <p className="text-[#808080] text-xs mb-0.5">{account.firstName}</p>
+              {editingName ? (
+                <div className="space-y-2">
+                  <label htmlFor="profile-name" className="text-[#606060] text-[10px] uppercase tracking-widest font-semibold">
+                    Nom de profil
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="profile-name"
+                      type="text"
+                      value={nameDraft}
+                      onChange={(e) => { setNameDraft(e.target.value); setNameError('') }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void saveProfileName()
+                        }
+                        if (e.key === 'Escape') cancelEditName()
+                      }}
+                      maxLength={40}
+                      placeholder="Ton prénom"
+                      autoComplete="nickname"
+                      autoFocus
+                      disabled={nameSaving}
+                      className="min-w-0 flex-1 rounded-xl px-3 py-2 text-sm text-white outline-none"
+                      style={{
+                        background: 'rgba(255,255,255,0.04)',
+                        border: '1px solid rgba(212,175,55,0.35)',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void saveProfileName()}
+                      disabled={nameSaving}
+                      aria-label="Enregistrer le nom"
+                      className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-50"
+                      style={{ background: 'rgba(212,175,55,0.15)', border: '1px solid rgba(212,175,55,0.35)' }}
+                    >
+                      <Check size={15} className="text-[#D4AF37]" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEditName}
+                      disabled={nameSaving}
+                      aria-label="Annuler"
+                      className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+                    >
+                      <X size={15} className="text-[#808080]" />
+                    </button>
+                  </div>
+                  {nameError && (
+                    <p className="text-red-400/90 text-[11px]">{nameError}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[#606060] text-[10px] uppercase tracking-widest font-semibold mb-0.5">
+                      Nom de profil
+                    </p>
+                    <p className="text-white font-semibold text-sm truncate">
+                      {account.firstName || 'Non renseigné'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={startEditName}
+                    aria-label="Modifier le nom de profil"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold flex-shrink-0"
+                    style={{
+                      color: '#D4AF37',
+                      background: 'rgba(212,175,55,0.08)',
+                      border: '1px solid rgba(212,175,55,0.25)',
+                    }}
+                  >
+                    <Pencil size={11} />
+                    {account.firstName ? 'Modifier' : 'Ajouter'}
+                  </button>
+                </div>
               )}
-              <p className="text-white font-semibold text-sm break-all">
+              <p className="text-white/80 font-semibold text-sm break-all mt-2.5">
                 {account.email ?? 'Membre'}
               </p>
             </div>

@@ -93,6 +93,20 @@ function paymentLabel(plan: string | null | undefined, amount: number): string {
   return 'Achat de crédits'
 }
 
+const MAX_PROFILE_NAME = 40
+
+function normalizeProfileName(value: unknown): string | null {
+  if (value == null) return null
+  if (typeof value !== 'string') throw new Error('Nom invalide')
+  const name = value.replace(/\s+/g, ' ').trim()
+  if (!name) return null
+  if (name.length > MAX_PROFILE_NAME) {
+    throw new Error(`Le nom doit faire au plus ${MAX_PROFILE_NAME} caractères`)
+  }
+  if (/[\u0000-\u001f\u007f]/.test(name)) throw new Error('Nom invalide')
+  return name
+}
+
 function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message
   if (typeof err === 'object' && err !== null && 'message' in err) {
@@ -229,6 +243,8 @@ Deno.serve(async (req: Request) => {
       sessionId?: string
       email?: string
       userId?: string
+      action?: string
+      firstName?: string
     }
 
     // Anti-IDOR : un userId/email dans le body sans JWT valide est refusé.
@@ -256,6 +272,39 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
       { auth: { persistSession: false } }
     )
+
+    if (body.action === 'updateProfile') {
+      if (!authUser?.id) {
+        return new Response(
+          JSON.stringify({ error: 'Connexion requise' }),
+          { status: 401, headers: { ...CORS, 'Content-Type': 'application/json' } }
+        )
+      }
+      let firstName: string | null
+      try {
+        firstName = normalizeProfileName(body.firstName)
+      } catch (err) {
+        return new Response(
+          JSON.stringify({ error: getErrorMessage(err) }),
+          { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } }
+        )
+      }
+      const { error: updateErr } = await db
+        .from('sessions')
+        .update({ first_name: firstName })
+        .eq('user_id', authUser.id)
+      if (updateErr) {
+        console.warn('[account] updateProfile failed:', getErrorMessage(updateErr))
+        return new Response(
+          JSON.stringify({ error: 'Impossible d’enregistrer le nom' }),
+          { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } }
+        )
+      }
+      return new Response(
+        JSON.stringify({ success: true, firstName }),
+        { headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
+    }
 
     const { primary, sessionIds, creditsBalance, ownedAtBySession } = await resolveAccount(db, {
       sessionId,
