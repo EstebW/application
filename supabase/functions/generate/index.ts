@@ -972,21 +972,44 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   ].filter(Boolean).join('\n')
 }
 
-/** Verrouillage source photo_edit — plus strict que facePreservationBlock (full_generation). */
+/** Préservation source photo_edit — identité stricte, scène globale, micro-ajustements autorisés. */
 function sourceLockBlock(starName: string, dual: boolean): string[] {
   const celeb = sanitizeSceneText(starName) || 'the celebrity'
   return [
-    'SOURCE LOCK (NON-NEGOTIABLE — photo_edit):',
-    'The first input image is the locked source photograph. Preserve it.',
-    'USER = IMMUTABLE: do not redraw, beautify, restyle, re-pose, crop, or replace the existing person. Keep face, hair, body, pose, clothes and accessories exactly as photographed.',
-    'SCENE = IMMUTABLE: do not add, delete, move, duplicate or rebuild background, furniture, objects, walls or geometry. Keep the original framing and crop.',
-    `ALLOWED CHANGE ONLY: insert ${celeb} plus indispensable contact/cast shadows, reflections and local occlusions on/near ${celeb}.`,
-    'Do not delete, hide, shift or remove any existing object to make room for the celebrity. If a bench (or any furniture, wall, prop) is in the original photo, it must remain present and in the same place.',
+    'SOURCE PRESERVATION (HIGH PRIORITY — photo_edit):',
+    'The first input image is the main source photograph and must remain the visual foundation of the final result.',
+    'USER IDENTITY = STRICTLY PRESERVED: keep the same person, same face, same hair, same overall identity, and same general body appearance.',
+    'Do not replace the user, do not beautify heavily, and do not change their identity.',
+    'Small pose adjustments are allowed only if they improve realism and natural interaction with the celebrity.',
+    'The user may be slightly reposed if needed, but must still look like the same real person in the same moment and same setting.',
+    'SCENE = GLOBALLY PRESERVED: keep the same overall environment, same mood, same amateur smartphone feel, same lighting logic, and same candid realism.',
+    'Do not fully rebuild or reinvent the scene.',
+    'Minor composition adjustments are allowed if they improve realism and the natural interaction.',
+    'Small repositioning of secondary elements is allowed only when it remains subtle and believable.',
+    `ALLOWED GOAL: integrate ${celeb} naturally into the source photo while preserving realism, identity, and the original candid feel.`,
+    'Do not turn the result into a polished professional photoshoot.',
+    'Do not make the image too perfect, too symmetrical, or too staged.',
     dual
-      ? `The second input image is FACE/HAIR IDENTITY REFERENCE ONLY for ${celeb}. Ignore and do not copy its pose, clothing, crop, lighting, background or image quality.`
+      ? `The second input image is FACE/HAIR IDENTITY REFERENCE ONLY for ${celeb}. Ignore its background, pose, clothes, crop, and image quality.`
       : '',
-    'If a nicer composition would require moving the user, moving an object, or changing the scene, keep the locked source and a simpler placement.',
-  ].filter((line) => line !== '')
+  ].filter(Boolean)
+}
+
+function naturalInteractionBlock(): string[] {
+  return [
+    'NATURAL INTERACTION PRIORITY:',
+    'The final image must feel like a real spontaneous moment, not a stiff side-by-side composite.',
+    'Preserve the user’s identity very faithfully, but allow slight pose adaptation if needed to create a more natural interaction.',
+    'Allow realistic body proximity, subtle leaning, relaxed posture, natural shoulder alignment, and candid body language.',
+    'Allow the celebrity and the user to stand closer together if that improves realism.',
+    'Allow natural gestures such as an arm around the shoulder, arm around the waist, slight lean-in, or natural hand placement when appropriate.',
+    'Preserve the overall setting, atmosphere, and smartphone snapshot feeling of the source photo.',
+    'Allow minor composition adjustments if they help the image feel more alive and believable.',
+    'Do not create a rigid “two people standing separately” result unless the scene naturally calls for it.',
+    'Do not regenerate the image into a polished, glamorous, or studio-quality portrait.',
+    'Do not create a perfectly symmetrical or over-posed couple shot.',
+    'Prefer believable imperfection over artificial perfection.',
+  ]
 }
 
 /**
@@ -1223,7 +1246,7 @@ async function analyzePhotoEditComposition(
     {
       role: 'system',
       content:
-        'Tu analyses UNE photo source pour décider si une deuxième personne réelle peut y être ajoutée sans déplacer l’utilisateur ni reconstruire le décor. Tu dois tenir compte de la taille réelle FOURNIE (sources Wikidata/Wikipédia), de la perspective, de la distance caméra et du plan de profondeur. N’estime JAMAIS une taille à partir des pixels de la photo. Réponds UNIQUEMENT en JSON.',
+        'Tu analyses UNE photo source pour décider si une deuxième personne réelle peut y être ajoutée en conservant l’identité des visages et la structure globale de la scène. De légers micro-ajustements de posture et d’objets secondaires sont autorisés s’ils rendent l’interaction plus vivante. Tu dois tenir compte de la taille réelle FOURNIE (sources Wikidata/Wikipédia), de la perspective, de la distance caméra et du plan de profondeur. N’estime JAMAIS une taille à partir des pixels de la photo. Réponds UNIQUEMENT en JSON.',
     },
     {
       role: 'user',
@@ -1239,13 +1262,14 @@ async function analyzePhotoEditComposition(
             '',
             'Détermine : position de l’utilisateur ; orientation et posture ; cadrage ; perspective ; profondeur ; distance caméra ; plan du sol / supports visibles ; objets importants ; zones réellement disponibles pour une deuxième personne à une profondeur comparable ; placement et posture plausibles de la célébrité.',
             'IDENTITÉ FACIALE : le placement doit laisser le visage de la célébrité assez grand pour conserver ses traits. Placer la célébrité à une profondeur proche de l’utilisateur. Ne jamais résoudre la composition en la transformant en petite silhouette d’arrière-plan.',
-            'OBJETS EXISTANTS : ne jamais supprimer, cacher ni déplacer un objet déjà présent (exemple : un banc) pour faire de la place à la célébrité.',
-            `Intention utilisateur (à ignorer si elle exige de bouger l’utilisateur, d’inventer un meuble, de supprimer un objet, ou de reculer fortement la célébrité) : ${sceneIntent}`,
-            'Ne jamais proposer de déplacer, recadrer ou modifier l’utilisateur. Ne jamais inventer de banc, chaise, mur, table ou support absent. Le placement doit être physiquement possible dans l’espace déjà visible, à une profondeur caméra comparable.',
+            'CONTRÔLE QUALITÉ : ne pas exiger que la posture soit identique à la photo source. Ne pas exiger que chaque petit objet soit à la même position exacte. Micro-ajustements naturels valides : légère rotation du buste, variation de posture, bras/mains, tête légèrement réorientée, rapprochement, interaction vivante, petit objet secondaire déplacé. Invalider seulement si la scène est trop transformée (décor recréé, meuble important fortement déplacé, objet important disparu, cadrage/angle totalement changé) ou si l’identité dérive.',
+            'OBJETS : conserver les objets importants. Un banc ou meuble structurant doit rester. Un petit objet secondaire (lunettes tenues autrement, tissu, rideau, accessoire) peut bouger légèrement.',
+            `Intention utilisateur (à ignorer si elle exige de reconstruire le décor, de supprimer un objet important, ou de reculer fortement la célébrité) : ${sceneIntent}`,
+            'Ne jamais proposer de recréer entièrement le décor ni de supprimer un objet important. De légers micro-ajustements de posture de l’utilisateur sont autorisés pour une interaction naturelle. Ne jamais inventer de banc, chaise, mur, table ou support absent. Le placement doit rester crédible dans l’espace déjà visible, à une profondeur caméra comparable.',
             lockedRatio != null
-              ? `Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, visage assez grand pour conserver ses traits, hauteur apparente ≈ ${Math.round(lockedRatio * 100)} % de l’utilisateur","targetApparentHeightRatio":${lockedRatio}}`
-              : 'Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, visage assez grand pour conserver ses traits"}',
-            'Si aucun emplacement ne permet simultanément de respecter la photo source (aucun objet supprimé ni déplacé), une profondeur proche, le ratio de taille réaliste ET un visage de célébrité suffisamment visible, ou si cela exigerait de déplacer l’utilisateur / reconstruire le décor / pousser la célébrité loin dans l’arrière-plan : {"suitable":false,"reason":"SOURCE_PHOTO_UNSUITABLE"}',
+              ? `Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, interaction naturelle vivante, visage assez grand pour conserver ses traits, hauteur apparente ≈ ${Math.round(lockedRatio * 100)} % de l’utilisateur","targetApparentHeightRatio":${lockedRatio}}`
+              : 'Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, interaction naturelle vivante, visage assez grand pour conserver ses traits"}',
+            'Si aucun emplacement ne permet simultanément de conserver l’identité des visages, la structure globale de la photo source, une profondeur proche, le ratio de taille réaliste ET un visage de célébrité suffisamment visible, ou si cela exigerait de reconstruire fortement le décor / pousser la célébrité loin dans l’arrière-plan : {"suitable":false,"reason":"SOURCE_PHOTO_UNSUITABLE"}',
           ].join('\n'),
         },
         { type: 'image_url', image_url: { url: toDataUrl(imageBase64) } },
@@ -1313,10 +1337,12 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...sourceLockBlock(starName, dual),
     '',
+    ...naturalInteractionBlock(),
+    '',
     'Tu reçois une PHOTO SOURCE réelle fournie par l’utilisateur. Cette photo source est la base absolue de l’image finale.',
     '',
     'IMAGE ORDER:',
-    '- First image = PHOTO SOURCE (utilisateur + décor). Base immuable.',
+    '- First image = PHOTO SOURCE (utilisateur + décor). Structure globale à conserver, puis à rendre vivante.',
     ...(dual
       ? [
           `- Second image = RÉFÉRENCE VISAGE / CHEVEUX UNIQUEMENT pour ${starName}. Ignorer son fond, sa pose, ses vêtements, son cadrage et sa qualité d’image.`,
@@ -1324,25 +1350,26 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
       : []),
     '',
     'OBJECTIF :',
-    `Ajouter naturellement ${starName} dans la photo source, comme si la célébrité était réellement présente au moment de la prise de vue, sans que l’ajout soit perceptible.`,
+    `Ajouter naturellement ${starName} dans la photo source, comme si la célébrité était réellement présente : photo naturelle, vivante et crédible, pas deux personnes figées côte à côte.`,
     '',
     ...celebrityIdentityLockBlock(starName, dual),
     '',
     'INSTRUCTIONS OBLIGATOIRES :',
-    '1. Conserver l’utilisateur tel qu’il apparaît dans la photo source :',
-    '- préserver son visage, ses traits, sa coiffure, sa morphologie, sa posture, ses vêtements et ses accessoires ;',
+    '1. Préserver très fidèlement l’utilisateur tel qu’il apparaît dans la photo source :',
+    '- préserver son visage, ses traits, sa coiffure, son identité visuelle et son apparence générale ;',
     '- ne pas embellir fortement ;',
     '- ne pas rajeunir ;',
-    '- ne modifier en aucune façon le visage, les cheveux, l’expression ou la tête de l’utilisateur ;',
-    '- ne pas remplacer son identité visuelle.',
+    '- ne pas remplacer son identité visuelle ;',
+    '- une légère adaptation de posture ou d’orientation corporelle est autorisée si cela améliore le naturel de la scène ;',
+    '- l’utilisateur doit rester clairement reconnaissable comme la même personne réelle.',
     '',
-    '2. Conserver la photo source :',
-    '- préserver le cadrage général ;',
-    '- préserver le décor, les objets, l’arrière-plan et la composition ;',
-    '- ne pas inventer de nouveaux éléments inutiles ;',
-    '- ne pas supprimer d’éléments importants ;',
-    '- ne pas dupliquer d’objets ;',
-    '- ne pas déplacer des éléments du décor de manière absurde.',
+    '2. Préserver la photo source comme base principale de la scène :',
+    '- préserver le cadrage général, l’ambiance, le décor principal et la sensation de photo réelle ;',
+    '- préserver la logique du lieu, des objets, de la lumière et de la composition ;',
+    '- ne pas recréer totalement la scène ;',
+    '- ne pas transformer l’image en photo trop parfaite ou trop professionnelle ;',
+    '- de petits ajustements de composition ou de détails secondaires sont autorisés s’ils améliorent le naturel global ;',
+    '- ne pas introduire d’éléments incohérents ou artificiels.',
     '',
     `3. Ajouter uniquement la célébrité ${starName} :`,
     ...(placement
@@ -1354,9 +1381,13 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
         ]
       : [
           `- la star doit avoir une posture cohérente avec la scène et avec l’intention suivante : ${sceneIntent}.`,
-          '- Si cette intention exigerait de bouger l’utilisateur, de recréer le décor ou d’inventer un meuble, IGNORER l’intention.',
+          '- Si cette intention exigerait de recréer le décor ou d’inventer un meuble, IGNORER l’intention.',
         ]),
     '- éviter toute impression de sticker, collage, cutout ou personnage “posé” dans un coin ;',
+    '- privilégier une interaction crédible et naturelle plutôt qu’une simple juxtaposition ;',
+    '- favoriser une proximité réaliste entre l’utilisateur et la célébrité ;',
+    '- autoriser une posture plus vivante, plus spontanée, et moins figée ;',
+    '- éviter un rendu où les deux personnes semblent juste “posées” l’une à côté de l’autre sans lien ;',
     '',
     '4. Cohérence visuelle obligatoire :',
     '- même lumière, direction de lumière, température, netteté, grain, détail et style smartphone amateur que la photo source ;',
@@ -1378,9 +1409,15 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     starDescription,
     '',
     'INTERDICTIONS ABSOLUES :',
-    '- ne modifier en aucune façon le visage, les cheveux, l’expression ou la tête de l’utilisateur ;',
+    '- ne pas changer fortement le visage de l’utilisateur ;',
+    '- ne pas changer ses cheveux ;',
+    '- ne pas altérer fortement sa morphologie ;',
+    '- ne pas changer fortement la taille apparente réelle ;',
     '- ne pas recréer entièrement la photo ;',
-    '- ne pas changer, reconstruire, déplacer ou supprimer le décor original ;',
+    '- ne pas recréer entièrement le décor ;',
+    '- ne pas supprimer un objet important ;',
+    '- ne pas déplacer fortement un meuble important ;',
+    '- ne pas transformer totalement l’angle ou le cadrage ;',
     '- ne pas ajouter de deuxième objet incohérent, ni banc/chaise/mur/table absents de la scène ;',
     '- ne pas placer la star à un endroit physiquement impossible ;',
     '- ne pas faire une star détourée, incrustée, affiche, pub ou studio.',
