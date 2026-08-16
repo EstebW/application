@@ -388,7 +388,6 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
         <div
           className="relative w-full rounded-3xl overflow-hidden"
           style={{
-            aspectRatio: '4/3',
             border: '2px solid rgba(212,175,55,0.5)',
             boxShadow: '0 0 60px rgba(212,175,55,0.2), 0 20px 60px rgba(0,0,0,0.8)',
           }}
@@ -400,11 +399,12 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
               <img
                 src={generatedImage}
                 alt={`Toi avec ${name}`}
-                className="absolute inset-0 w-full h-full object-cover"
+                className="block w-full h-auto"
+                style={{ objectFit: 'contain' }}
               />
               {/* Subtle vignette */}
               <div
-                className="absolute inset-0"
+                className="absolute inset-0 pointer-events-none"
                 style={{ background: 'radial-gradient(ellipse at 50% 50%, transparent 60%, rgba(0,0,0,0.4) 100%)' }}
               />
             </>
@@ -412,8 +412,8 @@ export default function SuccessScreen({ preview, generatedImage, celebrity, cele
             <>
               {/* Fallback: side-by-side mock */}
               <div
-                className="absolute inset-0 flex"
-                style={{ background: 'linear-gradient(160deg,#0d0d1a 0%,#1a0533 50%,#0d1a07 100%)' }}
+                className="relative w-full flex"
+                style={{ aspectRatio: '4/3', background: 'linear-gradient(160deg,#0d0d1a 0%,#1a0533 50%,#0d1a07 100%)' }}
               >
                 <div className="relative w-1/2 h-full overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
