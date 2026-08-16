@@ -429,10 +429,11 @@ function sourceLockBlock(starName: string, dual: boolean): string[] {
     'USER = IMMUTABLE: do not redraw, beautify, restyle, re-pose, crop, or replace the existing person. Keep face, hair, body, pose, clothes and accessories exactly as photographed.',
     'SCENE = IMMUTABLE: do not add, delete, move, duplicate or rebuild background, furniture, objects, walls or geometry. Keep the original framing and crop.',
     `ALLOWED CHANGE ONLY: insert ${celeb} plus indispensable contact/cast shadows, reflections and local occlusions on/near ${celeb}.`,
+    'Do not delete, hide, shift or remove any existing object to make room for the celebrity. If a bench (or any furniture, wall, prop) is in the original photo, it must remain present and in the same place.',
     dual
       ? `The second input image is FACE/HAIR IDENTITY REFERENCE ONLY for ${celeb}. Ignore and do not copy its pose, clothing, crop, lighting, background or image quality.`
       : '',
-    'If a nicer composition would require moving the user or changing the scene, keep the locked source and a simpler placement.',
+    'If a nicer composition would require moving the user, moving an object, or changing the scene, keep the locked source and a simpler placement.',
   ].filter((line) => line !== '')
 }
 
@@ -501,6 +502,33 @@ function photoEditScaleDepthLock(ctx: PhotoGenerationContext): string[] {
   ]
 }
 
+function computeTargetApparentHeightRatio(
+  userHeightCm?: number,
+  celebrityHeightCm?: number | null,
+): number | undefined {
+  if (!userHeightCm || !celebrityHeightCm || userHeightCm <= 0 || celebrityHeightCm <= 0) return undefined
+  return Math.round((celebrityHeightCm / userHeightCm) * 100) / 100
+}
+
+/** Ratio de hauteur visible — photo_edit uniquement, si les deux tailles réelles sont connues. */
+function visibleHeightRatioLockBlock(ctx: PhotoGenerationContext): string[] {
+  const userH = ctx.userHeightCm
+  const starH = ctx.celebrityHeightCm ?? null
+  const ratio = ctx.celebrityTargetApparentHeightRatio ?? computeTargetApparentHeightRatio(userH, starH)
+  if (ratio == null || !userH || !starH) return []
+  const pct = Math.round(ratio * 100)
+  return [
+    'VISIBLE HEIGHT RATIO LOCK — MANDATORY:',
+    `- At comparable camera depth, the celebrity's visible body height should be approximately ${pct}% of the user's visible body height.`,
+    `- Example: ${starH} cm vs ${userH} cm => approximately ${pct}%.`,
+    '- Do NOT make the celebrity look miniature.',
+    '- Do NOT create an exaggerated height difference.',
+    '- Apparent size difference must primarily come from real physical height, not from pushing the celebrity farther away.',
+    '- Keep the celebrity on a depth plane close to the user.',
+    "- Keep the celebrity's face large enough to preserve identity.",
+  ]
+}
+
 /**
  * Prompt « Ajouter la star à ma photo » — photo source = vérité.
  * Ne pas assouplir : toute régénération de visage / décor est un échec.
@@ -527,7 +555,9 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     [interactionPrompt, userHint].filter(Boolean).join(' — ')
   ) || 'présence naturelle, posture cohérente avec la scène, comme si la star était déjà là'
   const starDescription = sanitizeSceneText(
-    [domain && `${starName} (${domain})`, style].filter(Boolean).join('. ')
+    dual
+      ? (domain ? `${starName} (${domain})` : starName)
+      : [domain && `${starName} (${domain})`, style].filter(Boolean).join('. ')
   ) || starName
   const userHeightLabel = userHeightCm ? `${userHeightCm}` : 'non disponible'
   const starHeightLabel = celebrityHeightCm ? `${celebrityHeightCm}` : 'non disponible'
@@ -560,7 +590,7 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '- préserver son visage, ses traits, sa coiffure, sa morphologie, sa posture, ses vêtements et ses accessoires ;',
     '- ne pas embellir fortement ;',
     '- ne pas rajeunir ;',
-    '- ne pas changer son expression sauf micro-ajustement naturel si nécessaire ;',
+    '- ne modifier en aucune façon le visage, les cheveux, l’expression ou la tête de l’utilisateur ;',
     '- ne pas remplacer son identité visuelle.',
     '',
     '2. Conserver la photo source :',
@@ -597,15 +627,17 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...photoEditScaleDepthLock(ctx),
     '',
+    ...visibleHeightRatioLockBlock(ctx),
+    '',
     '6. Rendu attendu : photo réaliste amateur prise sur le vif, pas cinéma, pas glamour, pas esthétique IA.',
     '',
     'DESCRIPTION DE LA STAR :',
     starDescription,
     '',
     'INTERDICTIONS ABSOLUES :',
-    '- ne pas modifier fortement le visage de l’utilisateur ;',
+    '- ne modifier en aucune façon le visage, les cheveux, l’expression ou la tête de l’utilisateur ;',
     '- ne pas recréer entièrement la photo ;',
-    '- ne pas changer le décor sans nécessité ;',
+    '- ne pas changer, reconstruire, déplacer ou supprimer le décor original ;',
     '- ne pas ajouter de deuxième objet incohérent, ni banc/chaise/mur/table absents de la scène ;',
     '- ne pas placer la star à un endroit physiquement impossible ;',
     '- ne pas faire une star détourée, incrustée, affiche, pub ou studio.',

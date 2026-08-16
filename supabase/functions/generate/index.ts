@@ -148,6 +148,8 @@ interface PhotoGenerationContext {
   hasCelebrityReferenceImage?: boolean
   /** photo_edit : placement précis issu de l'analyse de composition */
   celebrityPlacementInstruction?: string
+  /** photo_edit : celebrityHeightCm / userHeightCm lorsque les deux tailles sont connues */
+  celebrityTargetApparentHeightRatio?: number
   /** Parcours « Choisis ta star » uniquement — absent = aucune contrainte de taille */
   userHeightCm?: number
   celebrityHeightCm?: number | null
@@ -979,10 +981,11 @@ function sourceLockBlock(starName: string, dual: boolean): string[] {
     'USER = IMMUTABLE: do not redraw, beautify, restyle, re-pose, crop, or replace the existing person. Keep face, hair, body, pose, clothes and accessories exactly as photographed.',
     'SCENE = IMMUTABLE: do not add, delete, move, duplicate or rebuild background, furniture, objects, walls or geometry. Keep the original framing and crop.',
     `ALLOWED CHANGE ONLY: insert ${celeb} plus indispensable contact/cast shadows, reflections and local occlusions on/near ${celeb}.`,
+    'Do not delete, hide, shift or remove any existing object to make room for the celebrity. If a bench (or any furniture, wall, prop) is in the original photo, it must remain present and in the same place.',
     dual
       ? `The second input image is FACE/HAIR IDENTITY REFERENCE ONLY for ${celeb}. Ignore and do not copy its pose, clothing, crop, lighting, background or image quality.`
       : '',
-    'If a nicer composition would require moving the user or changing the scene, keep the locked source and a simpler placement.',
+    'If a nicer composition would require moving the user, moving an object, or changing the scene, keep the locked source and a simpler placement.',
   ].filter((line) => line !== '')
 }
 
@@ -1048,6 +1051,33 @@ function photoEditScaleDepthLock(ctx: PhotoGenerationContext): string[] {
     '- Apparent size must come mainly from real height, not from an excessive distance to the camera.',
     '- Integrate the celebrity near the user, with coherent perspective, as if both were really in the room at the same moment.',
     '- If a placement instruction says “behind”, keep them only slightly behind on a nearby depth plane — never as a distant miniature figure.',
+  ]
+}
+
+function computeTargetApparentHeightRatio(
+  userHeightCm?: number,
+  celebrityHeightCm?: number | null,
+): number | undefined {
+  if (!userHeightCm || !celebrityHeightCm || userHeightCm <= 0 || celebrityHeightCm <= 0) return undefined
+  return Math.round((celebrityHeightCm / userHeightCm) * 100) / 100
+}
+
+/** Ratio de hauteur visible — photo_edit uniquement, si les deux tailles réelles sont connues. */
+function visibleHeightRatioLockBlock(ctx: PhotoGenerationContext): string[] {
+  const userH = ctx.userHeightCm
+  const starH = ctx.celebrityHeightCm ?? null
+  const ratio = ctx.celebrityTargetApparentHeightRatio ?? computeTargetApparentHeightRatio(userH, starH)
+  if (ratio == null || !userH || !starH) return []
+  const pct = Math.round(ratio * 100)
+  return [
+    'VISIBLE HEIGHT RATIO LOCK — MANDATORY:',
+    `- At comparable camera depth, the celebrity's visible body height should be approximately ${pct}% of the user's visible body height.`,
+    `- Example: ${starH} cm vs ${userH} cm => approximately ${pct}%.`,
+    '- Do NOT make the celebrity look miniature.',
+    '- Do NOT create an exaggerated height difference.',
+    '- Apparent size difference must primarily come from real physical height, not from pushing the celebrity farther away.',
+    '- Keep the celebrity on a depth plane close to the user.',
+    "- Keep the celebrity's face large enough to preserve identity.",
   ]
 }
 
@@ -1119,10 +1149,13 @@ async function callCompositionVision(messages: unknown[], apiKey: string): Promi
 }
 
 type CompositionAnalysis =
-  | { suitable: true; celebrityPlacementInstruction: string }
+  | { suitable: true; celebrityPlacementInstruction: string; targetApparentHeightRatio?: number }
   | { suitable: false }
 
-function parseCompositionResult(raw: Record<string, unknown>): CompositionAnalysis {
+function parseCompositionResult(
+  raw: Record<string, unknown>,
+  lockedRatio?: number,
+): CompositionAnalysis {
   if (raw.suitable === false || raw.reason === 'SOURCE_PHOTO_UNSUITABLE') {
     return { suitable: false }
   }
@@ -1130,7 +1163,11 @@ function parseCompositionResult(raw: Record<string, unknown>): CompositionAnalys
     ? sanitizeSceneText(raw.celebrityPlacementInstruction).slice(0, 400)
     : ''
   if (raw.suitable === true && instruction) {
-    return { suitable: true, celebrityPlacementInstruction: instruction }
+    return {
+      suitable: true,
+      celebrityPlacementInstruction: instruction,
+      ...(lockedRatio != null ? { targetApparentHeightRatio: lockedRatio } : {}),
+    }
   }
   throw new Error('Analyse de composition invalide')
 }
@@ -1149,22 +1186,25 @@ async function analyzePhotoEditComposition(
 
   const userH = ctx.userHeightCm
   const starH = ctx.celebrityHeightCm ?? null
+  const lockedRatio = ctx.celebrityTargetApparentHeightRatio
+    ?? computeTargetApparentHeightRatio(userH, starH)
   const heightBlock: string[] = []
-  if (userH && starH) {
+  if (userH && starH && lockedRatio != null) {
     const delta = Math.abs(userH - starH)
-    const ratio = starH / userH
-    const pct = Math.round(Math.abs(1 - ratio) * 100)
+    const pct = Math.round(lockedRatio * 100)
     const smallerOrLarger = starH < userH ? 'plus petite' : starH > userH ? 'plus grande' : 'de même taille'
     heightBlock.push(
       `Utilisateur : ${userH} cm`,
       `Célébrité : ${starH} cm`,
       `Différence réelle : ${delta} cm`,
-      `Ratio de hauteur physique ≈ ${ratio.toFixed(2)}`,
+      `Ratio de hauteur physique verrouillé : ${lockedRatio} (${starH} / ${userH})`,
+      `À profondeur caméra comparable, la hauteur apparente visible de la célébrité doit être d’environ ${pct} % de celle de l’utilisateur.`,
       '',
       'RÈGLE DE COMPOSITION :',
       'Si les deux personnes sont debout, privilégier un placement à profondeur caméra comparable afin que leur différence apparente provienne principalement de leur vraie différence de taille.',
       'Ne jamais placer la célébrité beaucoup plus loin simplement pour trouver une zone vide.',
-      `Une personne de ${starH} cm à côté d’une personne de ${userH} cm doit paraître environ ${pct} % ${smallerOrLarger} à distance caméra similaire, pas miniature.`,
+      `Une personne de ${starH} cm à côté d’une personne de ${userH} cm doit paraître seulement légèrement ${smallerOrLarger} (${pct} % de la hauteur visible de l’utilisateur), pas miniature.`,
+      'Ne pas inventer ni modifier targetApparentHeightRatio : recopier exactement la valeur verrouillée ci-dessus.',
       'Si aucun emplacement à profondeur comparable n’est disponible sans modifier fortement la photo source, retourner SOURCE_PHOTO_UNSUITABLE plutôt que pousser la célébrité loin dans l’arrière-plan.',
     )
   } else if (userH) {
@@ -1195,14 +1235,17 @@ async function analyzePhotoEditComposition(
             '',
             'TAILLE ET PROFONDEUR :',
             ...heightBlock,
-            'Ne pas estimer ni inventer une taille à partir de la photo source. Utiliser uniquement les mesures ci-dessus.',
+            'Ne pas estimer ni inventer une taille à partir de la photo source. Utiliser uniquement les mesures ci-dessus. Ne pas inventer targetApparentHeightRatio si une valeur verrouillée est fournie.',
             '',
             'Détermine : position de l’utilisateur ; orientation et posture ; cadrage ; perspective ; profondeur ; distance caméra ; plan du sol / supports visibles ; objets importants ; zones réellement disponibles pour une deuxième personne à une profondeur comparable ; placement et posture plausibles de la célébrité.',
             'IDENTITÉ FACIALE : le placement doit laisser le visage de la célébrité assez grand pour conserver ses traits. Placer la célébrité à une profondeur proche de l’utilisateur. Ne jamais résoudre la composition en la transformant en petite silhouette d’arrière-plan.',
-            `Intention utilisateur (à ignorer si elle exige de bouger l’utilisateur, d’inventer un meuble, ou de reculer fortement la célébrité) : ${sceneIntent}`,
+            'OBJETS EXISTANTS : ne jamais supprimer, cacher ni déplacer un objet déjà présent (exemple : un banc) pour faire de la place à la célébrité.',
+            `Intention utilisateur (à ignorer si elle exige de bouger l’utilisateur, d’inventer un meuble, de supprimer un objet, ou de reculer fortement la célébrité) : ${sceneIntent}`,
             'Ne jamais proposer de déplacer, recadrer ou modifier l’utilisateur. Ne jamais inventer de banc, chaise, mur, table ou support absent. Le placement doit être physiquement possible dans l’espace déjà visible, à une profondeur caméra comparable.',
-            'Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, visage assez grand pour conserver ses traits"}',
-            'Si aucun emplacement ne permet simultanément une échelle physique correcte, une profondeur crédible ET une identité faciale suffisamment préservée, ou si cela exigerait de déplacer l’utilisateur / reconstruire le décor / pousser la célébrité loin dans l’arrière-plan : {"suitable":false,"reason":"SOURCE_PHOTO_UNSUITABLE"}',
+            lockedRatio != null
+              ? `Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, visage assez grand pour conserver ses traits, hauteur apparente ≈ ${Math.round(lockedRatio * 100)} % de l’utilisateur","targetApparentHeightRatio":${lockedRatio}}`
+              : 'Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, visage assez grand pour conserver ses traits"}',
+            'Si aucun emplacement ne permet simultanément de respecter la photo source (aucun objet supprimé ni déplacé), une profondeur proche, le ratio de taille réaliste ET un visage de célébrité suffisamment visible, ou si cela exigerait de déplacer l’utilisateur / reconstruire le décor / pousser la célébrité loin dans l’arrière-plan : {"suitable":false,"reason":"SOURCE_PHOTO_UNSUITABLE"}',
           ].join('\n'),
         },
         { type: 'image_url', image_url: { url: toDataUrl(imageBase64) } },
@@ -1211,7 +1254,7 @@ async function analyzePhotoEditComposition(
   ]
 
   try {
-    const parsed = parseCompositionResult(extractJsonObject(await callCompositionVision(messages, apiKey)))
+    const parsed = parseCompositionResult(extractJsonObject(await callCompositionVision(messages, apiKey)), lockedRatio)
     console.log('[generate] composition:', JSON.stringify(parsed))
     return parsed
   } catch (firstErr) {
@@ -1223,7 +1266,7 @@ async function analyzePhotoEditComposition(
       },
     ]
     try {
-      const parsed = parseCompositionResult(extractJsonObject(await callCompositionVision(retryMessages, apiKey)))
+      const parsed = parseCompositionResult(extractJsonObject(await callCompositionVision(retryMessages, apiKey)), lockedRatio)
       console.log('[generate] composition retry:', JSON.stringify(parsed))
       return parsed
     } catch {
@@ -1255,7 +1298,9 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     [interactionPrompt, userHint].filter(Boolean).join(' — ')
   ) || 'présence naturelle, posture cohérente avec la scène, comme si la star était déjà là'
   const starDescription = sanitizeSceneText(
-    [domain && `${starName} (${domain})`, style].filter(Boolean).join('. ')
+    dual
+      ? (domain ? `${starName} (${domain})` : starName)
+      : [domain && `${starName} (${domain})`, style].filter(Boolean).join('. ')
   ) || starName
   const userHeightLabel = userHeightCm ? `${userHeightCm}` : 'non disponible'
   const starHeightLabel = celebrityHeightCm ? `${celebrityHeightCm}` : 'non disponible'
@@ -1288,7 +1333,7 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '- préserver son visage, ses traits, sa coiffure, sa morphologie, sa posture, ses vêtements et ses accessoires ;',
     '- ne pas embellir fortement ;',
     '- ne pas rajeunir ;',
-    '- ne pas changer son expression sauf micro-ajustement naturel si nécessaire ;',
+    '- ne modifier en aucune façon le visage, les cheveux, l’expression ou la tête de l’utilisateur ;',
     '- ne pas remplacer son identité visuelle.',
     '',
     '2. Conserver la photo source :',
@@ -1325,15 +1370,17 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '',
     ...photoEditScaleDepthLock(ctx),
     '',
+    ...visibleHeightRatioLockBlock(ctx),
+    '',
     '6. Rendu attendu : photo réaliste amateur prise sur le vif, pas cinéma, pas glamour, pas esthétique IA.',
     '',
     'DESCRIPTION DE LA STAR :',
     starDescription,
     '',
     'INTERDICTIONS ABSOLUES :',
-    '- ne pas modifier fortement le visage de l’utilisateur ;',
+    '- ne modifier en aucune façon le visage, les cheveux, l’expression ou la tête de l’utilisateur ;',
     '- ne pas recréer entièrement la photo ;',
-    '- ne pas changer le décor sans nécessité ;',
+    '- ne pas changer, reconstruire, déplacer ou supprimer le décor original ;',
     '- ne pas ajouter de deuxième objet incohérent, ni banc/chaise/mur/table absents de la scène ;',
     '- ne pas placer la star à un endroit physiquement impossible ;',
     '- ne pas faire une star détourée, incrustée, affiche, pub ou studio.',
@@ -1551,7 +1598,14 @@ async function createTask(
         },
       }
 
-  console.log(`[generate] createTask model=${payload.model} photo_edit=${ctx.creationMode === 'photo_edit'}`)
+  console.log('[generate] createTask', JSON.stringify({
+    model: payload.model,
+    photo_edit: ctx.creationMode === 'photo_edit',
+    userHeightCm: ctx.userHeightCm ?? null,
+    celebrityHeightCm: ctx.celebrityHeightCm ?? null,
+    targetApparentHeightRatio: ctx.celebrityTargetApparentHeightRatio ?? null,
+    celebrityPlacementInstruction: ctx.celebrityPlacementInstruction ?? null,
+  }))
   console.log(`[${payload.model}] prompt:`, prompt)
 
   const res = await fetch(`${KIE_API_BASE}/api/v1/jobs/createTask`, {
@@ -1769,6 +1823,8 @@ Deno.serve(async (req: Request) => {
       const celebrityHeight = await resolveCelebrityHeight(db, heightLookupName)
       generationContext.celebrityHeightCm = celebrityHeight.heightCm
       generationContext.celebrityHeightConfidence = celebrityHeight.confidence
+      const targetRatio = computeTargetApparentHeightRatio(userHeightCm, celebrityHeight.heightCm)
+      if (targetRatio != null) generationContext.celebrityTargetApparentHeightRatio = targetRatio
       logHeightEvent('constraint_applied', {
         celebrityId: celebrityHeight.celebrityId || starfusionCelebrityId,
         lookupName: heightLookupName,
@@ -1777,6 +1833,7 @@ Deno.serve(async (req: Request) => {
         userHeightCm,
         celebrityHeightCm: celebrityHeight.heightCm,
         celebrityHeightConfidence: celebrityHeight.confidence,
+        targetApparentHeightRatio: generationContext.celebrityTargetApparentHeightRatio ?? null,
         sourceUrl: celebrityHeight.sourceUrl,
       })
     }
@@ -1784,6 +1841,14 @@ Deno.serve(async (req: Request) => {
     if (creationMode === 'photo_edit') {
       const composition = await analyzePhotoEditComposition(imageBase64, generationContext, kieKey)
       if (!composition.suitable) {
+        console.log('[generate] photo_edit scale', JSON.stringify({
+          userHeightCm: generationContext.userHeightCm ?? null,
+          celebrityHeightCm: generationContext.celebrityHeightCm ?? null,
+          targetApparentHeightRatio: generationContext.celebrityTargetApparentHeightRatio ?? null,
+          celebrityPlacementInstruction: null,
+          kieModel: resolvePhotoEditModel(),
+          suitable: false,
+        }))
         return new Response(
           JSON.stringify({
             error: 'Cette photo ne permet pas d’ajouter la star de façon naturelle sans modifier la scène. Choisis une photo avec un peu plus d’espace autour de toi.',
@@ -1793,6 +1858,17 @@ Deno.serve(async (req: Request) => {
         )
       }
       generationContext.celebrityPlacementInstruction = composition.celebrityPlacementInstruction
+      if (composition.targetApparentHeightRatio != null) {
+        generationContext.celebrityTargetApparentHeightRatio = composition.targetApparentHeightRatio
+      }
+      console.log('[generate] photo_edit scale', JSON.stringify({
+        userHeightCm: generationContext.userHeightCm ?? null,
+        celebrityHeightCm: generationContext.celebrityHeightCm ?? null,
+        targetApparentHeightRatio: generationContext.celebrityTargetApparentHeightRatio ?? null,
+        celebrityPlacementInstruction: generationContext.celebrityPlacementInstruction,
+        kieModel: resolvePhotoEditModel(),
+        suitable: true,
+      }))
     }
 
     const sceneSummary = buildSceneSummary(generationContext)

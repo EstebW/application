@@ -107,4 +107,6 @@ export interface PhotoGenerationContext extends HeightContext {
   hasCelebrityReferenceImage?: boolean
   /** photo_edit : placement précis issu de l'analyse de composition */
   celebrityPlacementInstruction?: string
+  /** photo_edit : celebrityHeightCm / userHeightCm lorsque les deux tailles sont connues */
+  celebrityTargetApparentHeightRatio?: number
 }
