@@ -333,11 +333,16 @@ function heightFromClaim(claim: WikidataClaim): number | null {
 }
 
 async function fetchWikidataHeight(name: string, signal: AbortSignal): Promise<HeightCandidate | null> {
-  const searchUrl =
-    'https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&type=item&limit=3' +
-    `&language=fr&uselang=fr&search=${encodeURIComponent(name)}`
-  const search = await fetchHeightJson<{ search?: { id?: string }[] }>(searchUrl, signal)
-  const ids = (search.search ?? []).map((s) => s.id).filter((id): id is string => Boolean(id))
+  const searchLang = async (lang: string): Promise<string[]> => {
+    const searchUrl =
+      'https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&type=item&limit=3' +
+      `&language=${lang}&uselang=${lang}&search=${encodeURIComponent(name)}`
+    const search = await fetchHeightJson<{ search?: { id?: string }[] }>(searchUrl, signal)
+    return (search.search ?? []).map((s) => s.id).filter((id): id is string => Boolean(id))
+  }
+
+  let ids = await searchLang('fr')
+  if (ids.length === 0) ids = await searchLang('en')
   if (ids.length === 0) return null
 
   const entitiesUrl =
@@ -981,6 +986,71 @@ function sourceLockBlock(starName: string, dual: boolean): string[] {
   ].filter((line) => line !== '')
 }
 
+/**
+ * Identité faciale de la célébrité — photo_edit uniquement, si une vraie photo de référence est fournie.
+ */
+function celebrityIdentityLockBlock(starName: string, hasCelebrityReferenceImage: boolean): string[] {
+  if (!hasCelebrityReferenceImage) return []
+  const celeb = starName
+  return [
+    'CELEBRITY IDENTITY LOCK — NON-NEGOTIABLE:',
+    `image_input[1] / the second input image is the SINGLE source of truth for ${celeb}'s visual identity.`,
+    `The final face must remain faithfully the same person as in that reference — not a generic lookalike.`,
+    'Preserve exactly from the celebrity reference: face shape, skull width and proportions, jaw and chin, eyes and eye spacing, eyebrows, nose, lips, cheekbones, skin tone, apparent age, hairline, hair color, hair length and hair texture.',
+    'Do not generate a generic person who vaguely resembles the celebrity.',
+    'Do not beautify, smooth, rejuvenate, restyle or reinterpret the celebrity face.',
+    'Do not blend or fuse the celebrity face with the user.',
+    'Pose, clothing and lighting may change to match the source photo. Facial identity must not change.',
+    `The celebrity reference photo has priority over any internal knowledge of ${celeb}'s appearance.`,
+    'Placement must preserve enough facial resolution: keep the celebrity at a depth close to the user so the face stays large enough to keep their features. Never solve composition by turning the celebrity into a tiny background silhouette.',
+  ]
+}
+
+/** Échelle et profondeur photo_edit — évite la star minuscule trop loin derrière. */
+function photoEditScaleDepthLock(ctx: PhotoGenerationContext): string[] {
+  const userH = ctx.userHeightCm
+  const starH = ctx.celebrityHeightCm ?? null
+  const hasBoth = Boolean(userH && starH)
+  const delta = hasBoth ? Math.abs(userH! - starH!) : null
+  const celebrityShorter = hasBoth && starH! < userH!
+  const celebrityTaller = hasBoth && starH! > userH!
+
+  const heightLines = hasBoth
+    ? [
+        `- The user's real height is ${userH} cm. The celebrity's real height is ${starH} cm.`,
+        `- The real height difference is about ${delta} cm. This must look subtle and realistic, not extreme.`,
+        celebrityShorter
+          ? '- If both are standing on the same ground plane, the celebrity should appear clearly shorter, but not tiny.'
+          : celebrityTaller
+            ? '- If both are standing on the same ground plane, the celebrity should appear clearly taller, but not giant.'
+            : '- If both are standing on the same ground plane, they should appear essentially the same height.',
+      ]
+    : userH
+      ? [
+          `- The user's real height is ${userH} cm.`,
+          '- Use realistic adult human scale. Do not make the celebrity miniature.',
+        ]
+      : [
+          '- Use realistic adult human scale. Do not make the celebrity miniature by pushing them far back.',
+        ]
+
+  return [
+    'PHYSICAL SCALE AND DEPTH LOCK (NON-NEGOTIABLE):',
+    ...(hasBoth
+      ? ['- Use the user’s real height and the celebrity’s real height as hard visual constraints.']
+      : []),
+    ...heightLines,
+    '- Keep both people on a believable shared ground plane.',
+    '- If feet or the ground plane are visible, foot placement and floor contact must be coherent. If they are not visible, infer depth from body scale, perspective and environmental cues. Do not invent feet or reconstruct the user\'s lower body.',
+    '- Keep the celebrity at a similar camera distance to the user unless the scene explicitly requires otherwise.',
+    '- Place the celebrity on a depth plane close to the user.',
+    '- Do not solve composition by pushing the celebrity far into the background just to fit them in the image.',
+    '- Apparent size must come mainly from real height, not from an excessive distance to the camera.',
+    '- Integrate the celebrity near the user, with coherent perspective, as if both were really in the room at the same moment.',
+    '- If a placement instruction says “behind”, keep them only slightly behind on a nearby depth plane — never as a distant miniature figure.',
+  ]
+}
+
 function extractTextFromResponse(data: unknown): string {
   if (!data || typeof data !== 'object') return ''
   const d = data as Record<string, unknown>
@@ -1077,11 +1147,43 @@ async function analyzePhotoEditComposition(
     [interactionPrompt, userHint].filter(Boolean).join(' — ')
   ) || 'présence naturelle, comme si la star était déjà là'
 
+  const userH = ctx.userHeightCm
+  const starH = ctx.celebrityHeightCm ?? null
+  const heightBlock: string[] = []
+  if (userH && starH) {
+    const delta = Math.abs(userH - starH)
+    const ratio = starH / userH
+    const pct = Math.round(Math.abs(1 - ratio) * 100)
+    const smallerOrLarger = starH < userH ? 'plus petite' : starH > userH ? 'plus grande' : 'de même taille'
+    heightBlock.push(
+      `Utilisateur : ${userH} cm`,
+      `Célébrité : ${starH} cm`,
+      `Différence réelle : ${delta} cm`,
+      `Ratio de hauteur physique ≈ ${ratio.toFixed(2)}`,
+      '',
+      'RÈGLE DE COMPOSITION :',
+      'Si les deux personnes sont debout, privilégier un placement à profondeur caméra comparable afin que leur différence apparente provienne principalement de leur vraie différence de taille.',
+      'Ne jamais placer la célébrité beaucoup plus loin simplement pour trouver une zone vide.',
+      `Une personne de ${starH} cm à côté d’une personne de ${userH} cm doit paraître environ ${pct} % ${smallerOrLarger} à distance caméra similaire, pas miniature.`,
+      'Si aucun emplacement à profondeur comparable n’est disponible sans modifier fortement la photo source, retourner SOURCE_PHOTO_UNSUITABLE plutôt que pousser la célébrité loin dans l’arrière-plan.',
+    )
+  } else if (userH) {
+    heightBlock.push(
+      `Utilisateur : ${userH} cm`,
+      'Célébrité : taille non vérifiée — utiliser une échelle adulte réaliste.',
+      'Ne jamais miniaturiser la célébrité en la plaçant trop loin.',
+    )
+  } else {
+    heightBlock.push(
+      'Tailles non disponibles. Utiliser une échelle adulte réaliste. Ne jamais miniaturiser la célébrité en la plaçant trop loin.',
+    )
+  }
+
   const messages = [
     {
       role: 'system',
       content:
-        'Tu analyses UNE photo source pour décider si une deuxième personne réelle peut y être ajoutée sans déplacer l’utilisateur ni reconstruire le décor. Réponds UNIQUEMENT en JSON.',
+        'Tu analyses UNE photo source pour décider si une deuxième personne réelle peut y être ajoutée sans déplacer l’utilisateur ni reconstruire le décor. Tu dois tenir compte de la taille réelle FOURNIE (sources Wikidata/Wikipédia), de la perspective, de la distance caméra et du plan de profondeur. N’estime JAMAIS une taille à partir des pixels de la photo. Réponds UNIQUEMENT en JSON.',
     },
     {
       role: 'user',
@@ -1090,11 +1192,17 @@ async function analyzePhotoEditComposition(
           type: 'text',
           text: [
             `Analyse la PHOTO SOURCE. La célébrité à ajouter s’appelle ${starName}.`,
-            'Détermine : position de l’utilisateur ; orientation et posture ; cadrage ; perspective ; profondeur ; plan du sol / supports visibles ; objets importants ; zones réellement disponibles pour une deuxième personne ; placement et posture plausibles de la célébrité.',
-            `Intention utilisateur (à ignorer si elle exige de bouger l’utilisateur ou d’inventer un meuble) : ${sceneIntent}`,
-            'Ne jamais proposer de déplacer, recadrer ou modifier l’utilisateur. Ne jamais inventer de banc, chaise, mur, table ou support absent. Le placement doit être physiquement possible dans l’espace déjà visible.',
-            'Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité assise sur le muret à droite, légèrement derrière l’utilisateur, même profondeur et même perspective, cadrée à partir des cuisses"}',
-            'Si aucune intégration crédible n’est possible sans déplacer l’utilisateur ou reconstruire fortement le décor : {"suitable":false,"reason":"SOURCE_PHOTO_UNSUITABLE"}',
+            '',
+            'TAILLE ET PROFONDEUR :',
+            ...heightBlock,
+            'Ne pas estimer ni inventer une taille à partir de la photo source. Utiliser uniquement les mesures ci-dessus.',
+            '',
+            'Détermine : position de l’utilisateur ; orientation et posture ; cadrage ; perspective ; profondeur ; distance caméra ; plan du sol / supports visibles ; objets importants ; zones réellement disponibles pour une deuxième personne à une profondeur comparable ; placement et posture plausibles de la célébrité.',
+            'IDENTITÉ FACIALE : le placement doit laisser le visage de la célébrité assez grand pour conserver ses traits. Placer la célébrité à une profondeur proche de l’utilisateur. Ne jamais résoudre la composition en la transformant en petite silhouette d’arrière-plan.',
+            `Intention utilisateur (à ignorer si elle exige de bouger l’utilisateur, d’inventer un meuble, ou de reculer fortement la célébrité) : ${sceneIntent}`,
+            'Ne jamais proposer de déplacer, recadrer ou modifier l’utilisateur. Ne jamais inventer de banc, chaise, mur, table ou support absent. Le placement doit être physiquement possible dans l’espace déjà visible, à une profondeur caméra comparable.',
+            'Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, visage assez grand pour conserver ses traits"}',
+            'Si aucun emplacement ne permet simultanément une échelle physique correcte, une profondeur crédible ET une identité faciale suffisamment préservée, ou si cela exigerait de déplacer l’utilisateur / reconstruire le décor / pousser la célébrité loin dans l’arrière-plan : {"suitable":false,"reason":"SOURCE_PHOTO_UNSUITABLE"}',
           ].join('\n'),
         },
         { type: 'image_url', image_url: { url: toDataUrl(imageBase64) } },
@@ -1173,6 +1281,8 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     'OBJECTIF :',
     `Ajouter naturellement ${starName} dans la photo source, comme si la célébrité était réellement présente au moment de la prise de vue, sans que l’ajout soit perceptible.`,
     '',
+    ...celebrityIdentityLockBlock(starName, dual),
+    '',
     'INSTRUCTIONS OBLIGATOIRES :',
     '1. Conserver l’utilisateur tel qu’il apparaît dans la photo source :',
     '- préserver son visage, ses traits, sa coiffure, sa morphologie, sa posture, ses vêtements et ses accessoires ;',
@@ -1212,6 +1322,8 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     `- utilisateur ${userHeightLabel} cm si disponible ; célébrité ${starHeightLabel} cm si disponible ;`,
     '- ne jamais rendre la célébrité trop petite, trop grande ou disproportionnée.',
     '- Adapter la star à la photo, jamais l’utilisateur à la star.',
+    '',
+    ...photoEditScaleDepthLock(ctx),
     '',
     '6. Rendu attendu : photo réaliste amateur prise sur le vif, pas cinéma, pas glamour, pas esthétique IA.',
     '',
@@ -1608,42 +1720,11 @@ Deno.serve(async (req: Request) => {
       userHeightCm,
     }
 
-    if (creationMode === 'photo_edit') {
-      const composition = await analyzePhotoEditComposition(imageBase64, generationContext, kieKey)
-      if (!composition.suitable) {
-        return new Response(
-          JSON.stringify({
-            error: 'Cette photo ne permet pas d’ajouter la star de façon naturelle sans modifier la scène. Choisis une photo avec un peu plus d’espace autour de toi.',
-            code: 'SOURCE_PHOTO_UNSUITABLE',
-          }),
-          { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } }
-        )
-      }
-      generationContext.celebrityPlacementInstruction = composition.celebrityPlacementInstruction
-    }
-
-    const sceneSummary = buildSceneSummary(generationContext)
-
     const db = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
       { auth: { persistSession: false } }
     )
-
-    // La taille de la star n'est jamais fournie par le client : elle est
-    // résolue ici à partir du nom, puis mise en cache.
-    if (userHeightCm) {
-      const celebrityHeight = await resolveCelebrityHeight(db, celebrityName)
-      generationContext.celebrityHeightCm = celebrityHeight.heightCm
-      generationContext.celebrityHeightConfidence = celebrityHeight.confidence
-      logHeightEvent('constraint_applied', {
-        celebrityId: celebrityHeight.celebrityId,
-        creationMode,
-        userHeightCm,
-        celebrityHeightCm: celebrityHeight.heightCm,
-        celebrityHeightConfidence: celebrityHeight.confidence,
-      })
-    }
 
     // Bypass crédits : uniquement JWT + rôle DB super_admin.
     const appRole = await resolveAppRole(db, authUser.id)
@@ -1662,6 +1743,60 @@ Deno.serve(async (req: Request) => {
       )
     }
 
+    // Vérification préalable : ne consomme pas le crédit. Les appels payants
+    // Gemini/KIE n'ont lieu que si un crédit est disponible (sauf super_admin).
+    if (!unlimitedAccess) {
+      const available = billingSession?.credits_balance ?? 0
+      if (available < GENERATION_CREDIT_COST) {
+        return new Response(
+          JSON.stringify({
+            error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
+            code: 'APP_CREDITS_INSUFFICIENT',
+          }),
+          { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    // La taille de la star n'est jamais fournie par le client : elle est
+    // résolue ici à partir du nom / celebrityId StarFusion, puis mise en cache
+    // — AVANT l'analyse de composition en photo_edit.
+    // La photo célébrité n'est pas une source d'identité nominale : uniquement
+    // une référence visuelle pour Nano Banana.
+    if (userHeightCm) {
+      const starfusionCelebrityId = celebrityIdFromName(celebrityName)
+      const heightLookupName = celebrityName
+      const celebrityHeight = await resolveCelebrityHeight(db, heightLookupName)
+      generationContext.celebrityHeightCm = celebrityHeight.heightCm
+      generationContext.celebrityHeightConfidence = celebrityHeight.confidence
+      logHeightEvent('constraint_applied', {
+        celebrityId: celebrityHeight.celebrityId || starfusionCelebrityId,
+        lookupName: heightLookupName,
+        typedName: celebrityName,
+        creationMode,
+        userHeightCm,
+        celebrityHeightCm: celebrityHeight.heightCm,
+        celebrityHeightConfidence: celebrityHeight.confidence,
+        sourceUrl: celebrityHeight.sourceUrl,
+      })
+    }
+
+    if (creationMode === 'photo_edit') {
+      const composition = await analyzePhotoEditComposition(imageBase64, generationContext, kieKey)
+      if (!composition.suitable) {
+        return new Response(
+          JSON.stringify({
+            error: 'Cette photo ne permet pas d’ajouter la star de façon naturelle sans modifier la scène. Choisis une photo avec un peu plus d’espace autour de toi.',
+            code: 'SOURCE_PHOTO_UNSUITABLE',
+          }),
+          { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } }
+        )
+      }
+      generationContext.celebrityPlacementInstruction = composition.celebrityPlacementInstruction
+    }
+
+    const sceneSummary = buildSceneSummary(generationContext)
+
     let creditsBalance: number | undefined = billingSession?.credits_balance ?? undefined
     let creditReserved = false
 
@@ -1671,56 +1806,27 @@ Deno.serve(async (req: Request) => {
         p_amount: GENERATION_CREDIT_COST,
       })
       const consume = (consumeRaw ?? null) as { ok?: boolean; new_balance?: number } | null
-      if (consumeErr || !consume?.ok) {
-        // Fallback si la RPC n'est pas encore déployée : check classique (moins sûr)
-        if (consumeErr) {
-          console.warn('[generate] consume RPC unavailable, fallback check:', consumeErr.message)
-          const balance = billingSession?.credits_balance ?? 0
-          if (balance < GENERATION_CREDIT_COST) {
-            return new Response(
-              JSON.stringify({
-                error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
-                code: 'APP_CREDITS_INSUFFICIENT',
-              }),
-              { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
-            )
-          }
-          const newBalance = balance - GENERATION_CREDIT_COST
-          const { error: updErr } = await db
-            .from('sessions')
-            .update({ credits_balance: newBalance })
-            .eq('id', billingSessionId)
-            .gte('credits_balance', GENERATION_CREDIT_COST)
-          if (updErr) {
-            return new Response(
-              JSON.stringify({
-                error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
-                code: 'APP_CREDITS_INSUFFICIENT',
-              }),
-              { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
-            )
-          }
-          await db.from('credit_transactions').insert({
-            session_id: billingSessionId,
-            amount: -GENERATION_CREDIT_COST,
-            reason: 'generation',
-            reference_id: null,
-          })
-          creditsBalance = newBalance
-          creditReserved = true
-        } else {
-          return new Response(
-            JSON.stringify({
-              error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
-              code: 'APP_CREDITS_INSUFFICIENT',
-            }),
-            { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
-          )
-        }
-      } else {
-        creditsBalance = typeof consume.new_balance === 'number' ? consume.new_balance : undefined
-        creditReserved = true
+      if (consumeErr) {
+        console.error('[generate] consume_generation_credit failed:', consumeErr.message)
+        return new Response(
+          JSON.stringify({
+            error: 'Le débit de crédit est temporairement indisponible. Réessaie dans un instant.',
+            code: 'APP_CREDIT_DEBIT_UNAVAILABLE',
+          }),
+          { status: 503, headers: { ...CORS, 'Content-Type': 'application/json' } }
+        )
       }
+      if (!consume?.ok) {
+        return new Response(
+          JSON.stringify({
+            error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
+            code: 'APP_CREDITS_INSUFFICIENT',
+          }),
+          { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
+        )
+      }
+      creditsBalance = typeof consume.new_balance === 'number' ? consume.new_balance : undefined
+      creditReserved = true
     }
 
     // Mémoriser la taille — best-effort.

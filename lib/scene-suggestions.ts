@@ -437,6 +437,71 @@ function sourceLockBlock(starName: string, dual: boolean): string[] {
 }
 
 /**
+ * Identité faciale de la célébrité — photo_edit uniquement, si une vraie photo de référence est fournie.
+ */
+function celebrityIdentityLockBlock(starName: string, hasCelebrityReferenceImage: boolean): string[] {
+  if (!hasCelebrityReferenceImage) return []
+  const celeb = starName
+  return [
+    'CELEBRITY IDENTITY LOCK — NON-NEGOTIABLE:',
+    `image_input[1] / the second input image is the SINGLE source of truth for ${celeb}'s visual identity.`,
+    `The final face must remain faithfully the same person as in that reference — not a generic lookalike.`,
+    'Preserve exactly from the celebrity reference: face shape, skull width and proportions, jaw and chin, eyes and eye spacing, eyebrows, nose, lips, cheekbones, skin tone, apparent age, hairline, hair color, hair length and hair texture.',
+    'Do not generate a generic person who vaguely resembles the celebrity.',
+    'Do not beautify, smooth, rejuvenate, restyle or reinterpret the celebrity face.',
+    'Do not blend or fuse the celebrity face with the user.',
+    'Pose, clothing and lighting may change to match the source photo. Facial identity must not change.',
+    `The celebrity reference photo has priority over any internal knowledge of ${celeb}'s appearance.`,
+    'Placement must preserve enough facial resolution: keep the celebrity at a depth close to the user so the face stays large enough to keep their features. Never solve composition by turning the celebrity into a tiny background silhouette.',
+  ]
+}
+
+/** Échelle et profondeur photo_edit — évite la star minuscule trop loin derrière. */
+function photoEditScaleDepthLock(ctx: PhotoGenerationContext): string[] {
+  const userH = ctx.userHeightCm
+  const starH = ctx.celebrityHeightCm ?? null
+  const hasBoth = Boolean(userH && starH)
+  const delta = hasBoth ? Math.abs(userH! - starH!) : null
+  const celebrityShorter = hasBoth && starH! < userH!
+  const celebrityTaller = hasBoth && starH! > userH!
+
+  const heightLines = hasBoth
+    ? [
+        `- The user's real height is ${userH} cm. The celebrity's real height is ${starH} cm.`,
+        `- The real height difference is about ${delta} cm. This must look subtle and realistic, not extreme.`,
+        celebrityShorter
+          ? '- If both are standing on the same ground plane, the celebrity should appear clearly shorter, but not tiny.'
+          : celebrityTaller
+            ? '- If both are standing on the same ground plane, the celebrity should appear clearly taller, but not giant.'
+            : '- If both are standing on the same ground plane, they should appear essentially the same height.',
+      ]
+    : userH
+      ? [
+          `- The user's real height is ${userH} cm.`,
+          '- Use realistic adult human scale. Do not make the celebrity miniature.',
+        ]
+      : [
+          '- Use realistic adult human scale. Do not make the celebrity miniature by pushing them far back.',
+        ]
+
+  return [
+    'PHYSICAL SCALE AND DEPTH LOCK (NON-NEGOTIABLE):',
+    ...(hasBoth
+      ? ['- Use the user’s real height and the celebrity’s real height as hard visual constraints.']
+      : []),
+    ...heightLines,
+    '- Keep both people on a believable shared ground plane.',
+    '- If feet or the ground plane are visible, foot placement and floor contact must be coherent. If they are not visible, infer depth from body scale, perspective and environmental cues. Do not invent feet or reconstruct the user\'s lower body.',
+    '- Keep the celebrity at a similar camera distance to the user unless the scene explicitly requires otherwise.',
+    '- Place the celebrity on a depth plane close to the user.',
+    '- Do not solve composition by pushing the celebrity far into the background just to fit them in the image.',
+    '- Apparent size must come mainly from real height, not from an excessive distance to the camera.',
+    '- Integrate the celebrity near the user, with coherent perspective, as if both were really in the room at the same moment.',
+    '- If a placement instruction says “behind”, keep them only slightly behind on a nearby depth plane — never as a distant miniature figure.',
+  ]
+}
+
+/**
  * Prompt « Ajouter la star à ma photo » — photo source = vérité.
  * Ne pas assouplir : toute régénération de visage / décor est un échec.
  */
@@ -488,6 +553,8 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     'OBJECTIF :',
     `Ajouter naturellement ${starName} dans la photo source, comme si la célébrité était réellement présente au moment de la prise de vue, sans que l’ajout soit perceptible.`,
     '',
+    ...celebrityIdentityLockBlock(starName, dual),
+    '',
     'INSTRUCTIONS OBLIGATOIRES :',
     '1. Conserver l’utilisateur tel qu’il apparaît dans la photo source :',
     '- préserver son visage, ses traits, sa coiffure, sa morphologie, sa posture, ses vêtements et ses accessoires ;',
@@ -527,6 +594,8 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     `- utilisateur ${userHeightLabel} cm si disponible ; célébrité ${starHeightLabel} cm si disponible ;`,
     '- ne jamais rendre la célébrité trop petite, trop grande ou disproportionnée.',
     '- Adapter la star à la photo, jamais l’utilisateur à la star.',
+    '',
+    ...photoEditScaleDepthLock(ctx),
     '',
     '6. Rendu attendu : photo réaliste amateur prise sur le vif, pas cinéma, pas glamour, pas esthétique IA.',
     '',

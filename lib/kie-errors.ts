@@ -13,6 +13,10 @@ export function formatKieError(message: string, code?: string): string {
     return 'Crédits insuffisants. Achète un pack pour générer une nouvelle photo.'
   }
 
+  if (code === 'APP_CREDIT_DEBIT_UNAVAILABLE') {
+    return 'Le débit de crédit est temporairement indisponible. Réessaie dans un instant.'
+  }
+
   if (code === 'SOURCE_PHOTO_UNSUITABLE') {
     return 'Cette photo ne permet pas d’ajouter la star de façon naturelle sans modifier la scène. Choisis une photo avec un peu plus d’espace autour de toi.'
   }
