@@ -57,6 +57,7 @@ describe('longueur des prompts KIE', () => {
     assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS, `photo_edit ${prompt.length} > ${KIE_PROMPT_MAX_CHARS}`)
     assert.match(prompt, /SOURCE photo/)
     assert.match(prompt, /PLACEMENT/)
+    assert.match(prompt, /PHOTOREALISM/)
     assert.match(prompt, /182/)
   })
 
@@ -104,7 +105,9 @@ describe('clampKiePrompt', () => {
       'IDENTITY_TOKEN_UNIQUE keep this lock',
       'PERSON A HARD LOCK:',
       'PERSON_A_LOCK_TOKEN',
-      'PHOTOREALISM — filler:',
+      'PHOTOREALISM — amateur smartphone snap (after face locks):',
+      'PHOTOREALISM_TOKEN_UNIQUE',
+      'WARDROBE: filler:',
       'z'.repeat(5000),
       'USER SCENE BRIEF (setting/outfits/pose ONLY — faces stay locked; follow literally):',
       '1. LOCATION / SETTING: TOKEN_BRIEF_UNIQUE',
@@ -118,6 +121,7 @@ describe('clampKiePrompt', () => {
     assert.match(prompt, /IDENTITY_TOKEN_UNIQUE/)
     assert.match(prompt, /PERSON A HARD LOCK/)
     assert.match(prompt, /PERSON_A_LOCK_TOKEN/)
+    assert.match(prompt, /PHOTOREALISM_TOKEN_UNIQUE/)
     assert.match(prompt, /USER SCENE BRIEF/)
     assert.match(prompt, /TOKEN_BRIEF_UNIQUE/)
     assert.notEqual(prompt, oversized.slice(0, KIE_PROMPT_MAX_CHARS))

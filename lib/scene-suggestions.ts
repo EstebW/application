@@ -158,11 +158,11 @@ interface PromptSection {
 }
 
 const PROTECTED_SECTION_HEADER =
-  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:)/i
+  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM)/i
 const SECONDARY_SECTION_HEADER =
   /^(SCENE REQUIREMENTS|FINAL MANDATORY CHECK|SUBJECTS:)/i
 const OTHER_SECTION_HEADER =
-  /^(PHOTOREALISM|WARDROBE|MODE:|IMAGE ORDER|GOAL:|INTERACTION:|LIGHTING:|FORBIDDEN|PRIORITY \d)/i
+  /^(WARDROBE|MODE:|IMAGE ORDER|GOAL:|INTERACTION:|LIGHTING:|FORBIDDEN|PRIORITY \d)/i
 
 function classifySectionHeader(line: string): PromptSectionKind | null {
   if (PROTECTED_SECTION_HEADER.test(line)) return 'protected'
@@ -308,9 +308,12 @@ function photorealismBlock(celebrityName: string): string[] {
   const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
   return [
     'PHOTOREALISM — amateur smartphone snap (after face locks):',
-    `Genuine casual phone photo of the user with ${celeb}: natural lighting, slightly imperfect framing, handheld feel, real skin texture, realistic hands/hair/clothes. Not CGI, studio, glamour, beauty filter, or influencer look.`,
-    'Follow the USER SCENE BRIEF literally — no generic red-carpet / yacht upgrade unless asked.',
-    "Variation: randomize camera, pose, and imperfections. NEVER randomize Person A's identity.",
+    `Ordinary phone-gallery photo with ${celeb}: candid, slightly imperfect, not AI/CGI/studio/glamour/influencer/pro shoot.`,
+    'Natural skin with pores, texture, and small flaws. No smoothed skin, beauty filter, or boosted makeup.',
+    'Slightly imperfect framing, focus, and exposure. Mild phone noise, JPEG compression, realistic lens flaws.',
+    'Natural expressions and posture. Realistic hands, hair, and clothes.',
+    'BOTH people share the same sharpness, grain, exposure, lighting, and color. The celebrity must never look sharper, cleaner, or better shot than the user.',
+    "Follow the USER SCENE BRIEF literally. Vary camera/pose/flaws only — never Person A's identity.",
   ]
 }
 
@@ -518,6 +521,8 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
         ]),
     'INTERACTION: believable proximity, relaxed posture, candid body language. Not two stiff cutouts.',
     'LIGHTING: match the source photo (direction, warmth, sharpness, grain). Real contact shadows.',
+    'The inserted celebrity must inherit the photographic imperfections of the SOURCE photo: same sharpness, noise, compression, exposure, color response and phone-camera quality. Do not improve the source photo to match the celebrity. Adapt/degrade the celebrity to the source when necessary.',
+    ...photorealismBlock(starName),
     ...photoEditHeightLines(ctx),
     '',
     'FORBIDDEN: face-swap artifacts, sticker/cutout look, studio/glamour, rebuilding the scene, removing important objects, changing the user\'s face or hair, physically impossible placement.',
