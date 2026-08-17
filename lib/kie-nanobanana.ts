@@ -6,7 +6,8 @@ import { createServerClient } from './supabase'
 const KIE_API_BASE = 'https://api.kie.ai'
 const KIE_FILE_API_BASE = 'https://kieai.redpandaai.co'
 const POLL_INTERVAL_MS = 3000
-const POLL_TIMEOUT_MS = 90_000
+/** Nano Banana dépasse souvent 90s ; un abort trop tôt affiche une erreur alors que la photo est prête. */
+const POLL_TIMEOUT_MS = 300_000
 
 function stripDataUrl(base64: string) {
   return base64.replace(/^data:image\/\w+;base64,/, '')
@@ -204,7 +205,7 @@ async function pollTask(taskId: string, apiKey: string): Promise<string> {
       throw new Error(formatKieError(`Nano Banana 2: ${record.failMsg ?? 'échec de génération'}`))
     }
   }
-  throw new Error('Nano Banana 2: timeout 90 secondes')
+  throw new Error('Nano Banana 2: timeout — la génération n’a pas renvoyé d’image à temps')
 }
 
 export async function generateCelebrityPhoto(

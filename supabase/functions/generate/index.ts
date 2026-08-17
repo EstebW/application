@@ -58,7 +58,8 @@ async function getAuthUser(req: Request): Promise<User | null> {
 const KIE_API_BASE = 'https://api.kie.ai'
 const KIE_FILE_API_BASE = 'https://kieai.redpandaai.co'
 const POLL_INTERVAL_MS = 3000
-const POLL_TIMEOUT_MS = 90_000
+/** Nano Banana dépasse souvent 90s ; un abort trop tôt affiche une erreur alors que la photo est prête. */
+const POLL_TIMEOUT_MS = 300_000
 const GENERATION_CREDIT_COST = 1
 const COMPOSITION_MODEL = 'gemini-3-flash'
 const COMPOSITION_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
@@ -1692,7 +1693,7 @@ async function pollTask(taskId: string, apiKey: string): Promise<string> {
       throw new Error(`Nano Banana 2 échoué: ${record.failMsg ?? 'inconnu'}`)
     }
   }
-  throw new Error('Nano Banana 2: timeout 90 secondes')
+  throw new Error('Nano Banana 2: timeout — la génération n’a pas renvoyé d’image à temps')
 }
 
 Deno.serve(async (req: Request) => {

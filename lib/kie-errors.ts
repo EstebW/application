@@ -25,6 +25,10 @@ export function formatKieError(message: string, code?: string): string {
     return 'Le service de génération IA est temporairement indisponible (crédits fournisseur épuisés). Réessaie un peu plus tard.'
   }
 
+  if (lower.includes('timeout')) {
+    return 'La génération a pris trop de temps. Réessaie — la photo est parfois prête juste après.'
+  }
+
   if (
     lower.includes('422') ||
     lower.includes('sensitive') ||
