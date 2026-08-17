@@ -11,6 +11,10 @@ import { callFunction, FunctionCallError } from '@/lib/functions'
 import { formatKieError, isSensitiveContentError } from '@/lib/kie-errors'
 import { getCelebrityFirstName } from '@/lib/celebrity-image'
 import { celebrityIdFromName } from '@/lib/height'
+import {
+  generationProgressFromElapsed,
+  generationStepFromElapsed,
+} from '@/lib/generation-progress'
 
 interface GenerationLoaderProps {
   preview: string
@@ -60,20 +64,12 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
     if (called.current) return
     called.current = true
 
-    // Progress animation — slower (generation takes longer)
-    const progressInterval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 85) return prev
-        return prev + 0.8
-      })
-    }, 80)
-
-    const stepInterval = setInterval(() => {
-      setStepIndex((prev) => Math.min(prev + 1, steps.length - 2))
-    }, 2500)
-
-    const MIN_MS = 4000
     const t0 = Date.now()
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - t0
+      setProgress(generationProgressFromElapsed(elapsed))
+      setStepIndex(generationStepFromElapsed(elapsed))
+    }, 250)
 
     callFunction<{ imageBase64?: string; generationId?: string; creditsBalance?: number; error?: string }>(
       'generate',
@@ -110,26 +106,18 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
       }
     )
       .then((data) => {
-        clearInterval(stepInterval)
+        clearInterval(progressInterval)
 
         if (data.error || !data.imageBase64) {
           throw new Error(data.error ?? 'Pas d\'image générée')
         }
 
-        const elapsed = Date.now() - t0
-        const remaining = Math.max(0, MIN_MS - elapsed)
-
-        setStepIndex(steps.length - 1)
-
-        setTimeout(() => {
-          clearInterval(progressInterval)
-          setProgress(100)
-          setTimeout(() => onComplete(data.imageBase64!, data.generationId, data.creditsBalance), 600)
-        }, remaining)
+        setStepIndex(generationStepFromElapsed(Date.now() - t0, true))
+        setProgress(100)
+        setTimeout(() => onComplete(data.imageBase64!, data.generationId, data.creditsBalance), 700)
       })
       .catch((err: unknown) => {
         clearInterval(progressInterval)
-        clearInterval(stepInterval)
         const message = err instanceof Error ? err.message : 'Erreur inconnue'
         const code = err instanceof FunctionCallError ? err.code : undefined
         const formatted = formatKieError(message, code)
@@ -146,7 +134,6 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
 
     return () => {
       clearInterval(progressInterval)
-      clearInterval(stepInterval)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

@@ -48,7 +48,7 @@ const TESTIMONIALS = [
   {
     name: 'Sofia, 22 ans',
     city: 'Paris',
-    text: "J'étais sceptique mais le résultat m'a bluffée. Le score de 91% avec Zendaya était incroyable ! La photo avec elle est trop stylée.",
+    text: "J’y croyais vraiment pas. Zendaya c’est pas du tout ce que j’attendais, et ma sœur a mis deux secondes à dire « c’est trop toi ». Un peu flippant.",
     celeb: 'Zendaya',
     score: 91,
     stars: 5,
@@ -56,7 +56,7 @@ const TESTIMONIALS = [
   {
     name: 'Lucas, 28 ans',
     city: 'Lyon',
-    text: "On m'a toujours dit que je ressemble à quelqu'un de connu. L'IA a trouvé Ryan Gosling — mes amis ont kiffé la photo générée !",
+    text: "Mes potes me bassinent avec Gosling depuis le lycée. J’ai testé pour rire, j’ai envoyé la photo sur le groupe, et ils ont tous répondu la même chose.",
     celeb: 'Ryan Gosling',
     score: 87,
     stars: 5,
@@ -64,7 +64,7 @@ const TESTIMONIALS = [
   {
     name: 'Emma, 19 ans',
     city: 'Bordeaux',
-    text: "94% de ressemblance avec Anya Taylor-Joy 😭 J'ai partagé la photo sur Instagram et j'ai eu 2000 likes en 24h.",
+    text: "Anya Taylor-Joy j’aurais jamais deviné. J’ai mis la photo en story et j’ai passé ma soirée à répondre aux gens. Un peu gênant mais trop drôle.",
     celeb: 'Anya Taylor-Joy',
     score: 94,
     stars: 5,
@@ -403,13 +403,12 @@ export default function HeroSection({ onPhotoSelected }: HeroSectionProps) {
             border: '1px solid rgba(212,175,55,0.15)',
           }}
         >
-          <p className="text-white text-sm font-bold text-center">Ce que tu obtiens, gratuitement</p>
+          <p className="text-white text-sm font-bold text-center">Ce que tu obtiens</p>
           <div className="space-y-2.5">
             {[
               "Analyse faciale approfondie",
               "Score de ressemblance précis en %",
               "Ton portrait avec ta célébrité jumelle",
-              "Résultat en moins de 10 secondes",
               "Aucune photo stockée, vie privée protégée",
             ].map((item, i) => (
               <div key={i} className="flex items-start gap-2.5">
@@ -461,7 +460,7 @@ export default function HeroSection({ onPhotoSelected }: HeroSectionProps) {
 
         <p className="text-center text-[#404040] text-xs flex items-center justify-center gap-1.5">
           <Lock size={10} className="flex-shrink-0" />
-          Analyse gratuite · Compte requis pour débloquer ta photo
+          Compte requis pour débloquer ta photo
         </p>
       </motion.div>
 

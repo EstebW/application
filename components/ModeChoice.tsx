@@ -79,8 +79,7 @@ export default function ModeChoice({ onSelectMatch, onSelectCustom }: ModeChoice
             avec un score de ressemblance précis.
           </p>
 
-          <div className="flex items-center justify-between pt-1">
-            <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Gratuit · 10 secondes</span>
+          <div className="flex items-center justify-end pt-1">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center"
               style={{ background: 'rgba(212,175,55,0.15)' }}>
               <ChevronRight size={18} className="text-[#D4AF37]" />

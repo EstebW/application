@@ -187,11 +187,10 @@ export default function PhotoSceneCustomizer({
       return
     }
     if (isPhotoEdit) {
-      // Pas de scène : la photo importée est la scène. La note reste facultative.
+      // Selfie figé : pas d'interaction choisie, la note reste facultative.
       onSubmit({
         mode: 'presets',
         creationMode: 'photo_edit',
-        interaction,
         customPrompt: editNote.trim() || undefined,
       })
       return
@@ -344,12 +343,6 @@ export default function PhotoSceneCustomizer({
                 </button>
               )}
             </div>
-
-            <InteractionPicker
-              value={interaction}
-              onChange={setInteraction}
-              hint={`Comment ${name} se place à côté de toi. Ignoré si ça obligerait à modifier ta photo.`}
-            />
 
             <div className="space-y-2.5">
               <div className="flex items-center gap-2">
