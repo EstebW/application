@@ -166,6 +166,7 @@ export default function PaymentScreen({
           email: billingEmail,
           generationId,
           returnTo,
+          appMode,
         }),
       })
 

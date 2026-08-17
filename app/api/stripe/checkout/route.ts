@@ -20,6 +20,7 @@ type Body = {
   generationId?: string
   /** 'home' | 'dashboard' — où revenir après paiement */
   returnTo?: string
+  appMode?: 'match' | 'custom' | null
 }
 
 export async function POST(req: Request) {
@@ -37,6 +38,8 @@ export async function POST(req: Request) {
     const sessionId = body.sessionId?.trim() || undefined
     const generationId = body.generationId?.trim() || undefined
     const returnTo = body.returnTo === 'dashboard' ? 'dashboard' : 'home'
+    const appMode = body.appMode === 'custom' ? 'custom' : 'match'
+    const funnelPay = appMode === 'custom' ? '/star/paiement' : '/jumeau/paiement'
 
     const db = createServerClient()
     const billingSessionId = await resolveBillingSessionId(db, { sessionId, userId, email })
@@ -48,8 +51,8 @@ export async function POST(req: Request) {
     }
 
     const origin = appOrigin(req)
-    const successPath = returnTo === 'dashboard' ? '/dashboard' : '/'
-    const cancelPath = returnTo === 'dashboard' ? '/dashboard?checkout=cancel' : '/?checkout=cancel'
+    const successPath = returnTo === 'dashboard' ? '/dashboard' : funnelPay
+    const cancelPath = returnTo === 'dashboard' ? '/dashboard?checkout=cancel' : `${funnelPay}?checkout=cancel`
 
     const metadata: Record<string, string> = {
       plan,

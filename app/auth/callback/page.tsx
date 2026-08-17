@@ -61,8 +61,8 @@ export default function AuthCallbackPage() {
         if (user.email) setStoredEmail(user.email)
 
         if (oauthCtx?.intent === 'funnel') {
-          // Contexte conservé pour app/page.tsx (?oauth=funnel)
-          window.location.replace('/?oauth=funnel')
+          const payPath = oauthCtx.appMode === 'custom' ? '/star/paiement' : '/jumeau/paiement'
+          window.location.replace(`${payPath}?oauth=funnel`)
           return
         }
 

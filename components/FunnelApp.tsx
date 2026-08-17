@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, LogIn, LayoutDashboard } from 'lucide-react'
 import Link from 'next/link'
@@ -48,28 +49,18 @@ import {
   readOAuthReturnContext,
   saveOAuthReturnContext,
 } from '@/lib/oauth-return'
+import {
+  applyFunnelPageView,
+  funnelPageTitle,
+  funnelPath,
+  parseFunnelPath,
+  safeFunnelStep,
+  type FunnelAppMode,
+  type FunnelStep,
+} from '@/lib/funnel-routes'
 
-// ── Deux funnels :
-// 1) Match : photo → analyse → teaser flouté → (compte) → paiement → révélation jumeau → scène → génération
-// 2) Custom : mode → star → photo (selfie si photo_edit) → (compte) → paiement → scène → génération
-type Step =
-  | 'modeChoice'
-  | 'hero'
-  | 'upload'
-  | 'analyzing'
-  | 'teaser'
-  | 'customUpload'
-  | 'customCelebrity'
-  | 'creationChoice'
-  | 'basePhoto'
-  | 'signup'
-  | 'payment'
-  | 'result'
-  | 'customize'
-  | 'generating'
-  | 'success'
-
-type AppMode = 'match' | 'custom'
+type Step = FunnelStep
+type AppMode = FunnelAppMode
 
 function getStepperState(
   step: Step,
@@ -150,9 +141,12 @@ const slideVariants = {
   exit: { opacity: 0, y: -20, scale: 0.98, transition: { duration: 0.35 } },
 }
 
-export default function HomePage() {
-  const [step, setStep] = useState<Step>('modeChoice')
-  const [appMode, setAppMode] = useState<AppMode | null>(null)
+export default function FunnelApp() {
+  const pathname = usePathname()
+  const router = useRouter()
+  const parsed = parseFunnelPath(pathname)
+  const [step, setStep] = useState<Step>(parsed.step)
+  const [appMode, setAppMode] = useState<AppMode | null>(parsed.appMode)
   const [photoPreview, setPhotoPreview] = useState('')
   const [celebrity, setCelebrity] = useState<CelebrityResult | null>(null)
   const [celebrityPhoto, setCelebrityPhoto] = useState('')
@@ -173,6 +167,47 @@ export default function HomePage() {
   const [userEmail, setUserEmail] = useState<string | undefined>()
   const [userFirstName, setUserFirstName] = useState<string | null>(null)
   const sessionInitialized = useRef(false)
+  const syncingFromUrl = useRef(false)
+  const stepRef = useRef(step)
+  const appModeRef = useRef(appMode)
+  stepRef.current = step
+  appModeRef.current = appMode
+
+  const goTo = useCallback((next: Step, mode?: AppMode | null) => {
+    if (mode !== undefined) setAppMode(mode)
+    setStep(next)
+  }, [])
+
+  useEffect(() => {
+    const path = funnelPath(step, appMode)
+    applyFunnelPageView(path, funnelPageTitle(step, appMode))
+    if (syncingFromUrl.current) {
+      syncingFromUrl.current = false
+      return
+    }
+    if (typeof window !== 'undefined' && window.location.pathname !== path) {
+      router.push(path)
+    }
+  }, [step, appMode, router])
+
+  useEffect(() => {
+    const currentPath = funnelPath(stepRef.current, appModeRef.current)
+    if (pathname === currentPath) return
+    syncingFromUrl.current = true
+    const parsedPath = parseFunnelPath(pathname)
+    setStep(parsedPath.step)
+    setAppMode(parsedPath.appMode)
+  }, [pathname])
+
+  useEffect(() => {
+    const guarded = safeFunnelStep(step, appMode, {
+      photoPreview,
+      celebrity,
+      generationRequest,
+      generatedImage,
+    })
+    if (guarded !== step) goTo(guarded)
+  }, [step, appMode, photoPreview, celebrity, generationRequest, generatedImage, goTo])
 
   const applyAccountFlags = useCallback((data: AccountData) => {
     setCreditsBalance(data.creditsBalance)
@@ -273,7 +308,7 @@ export default function HomePage() {
     const { data: { user } } = await supabase.auth.getUser()
 
     if (!user) {
-      setStep('signup')
+      goTo('signup')
       return
     }
 
@@ -299,7 +334,7 @@ export default function HomePage() {
         setStoredEmail(data.email)
       }
       if (accountHasUnlimitedAccess(data)) {
-        setStep(appMode === 'match' ? 'result' : 'customize')
+        goTo(appMode === 'match' ? 'result' : 'customize')
         return
       }
     } catch {
@@ -307,27 +342,25 @@ export default function HomePage() {
     }
 
     // Utilisateurs normaux : toujours passer par la page paiement
-    setStep('payment')
+    goTo('payment')
   }, [sessionId, userEmail, appMode, applyAccountFlags])
 
   const handleSelectMatchMode = useCallback(() => {
-    setAppMode('match')
-    setStep('hero')
-  }, [])
+    goTo('hero', 'match')
+  }, [goTo])
 
   const handleSelectCustomMode = useCallback(() => {
-    setAppMode('custom')
-    setStep('creationChoice')
-  }, [])
+    goTo('creationChoice', 'custom')
+  }, [goTo])
 
   const handlePhotoSelected = useCallback((_file: File, preview: string) => {
     setPhotoPreview(preview)
-    setStep('upload')
+    goTo('upload')
   }, [])
 
   const continueAfterCustomPhoto = useCallback(() => {
     if (hasUnlocked) {
-      setStep('customize')
+      goTo('customize')
       return
     }
     void routeToUnlock()
@@ -356,16 +389,16 @@ export default function HomePage() {
     })
     setCelebrityPhoto(data.celebrityImageBase64)
     if (creationMode === 'photo_edit') {
-      setStep('basePhoto')
+      goTo('basePhoto')
       return
     }
-    setStep('customUpload')
+    goTo('customUpload')
   }, [creationMode])
 
   const handleCreationModeSubmit = useCallback((mode: CelebrityCreationMode) => {
     setCreationMode(mode)
     if (mode === 'full_generation') setBasePhoto('')
-    setStep('customCelebrity')
+    goTo('customCelebrity')
   }, [])
 
   // Changer de photo après le paiement ne doit pas renvoyer sur le paywall.
@@ -373,27 +406,27 @@ export default function HomePage() {
     setBasePhoto(photo)
     setPhotoPreview(photo)
     if (hasUnlocked) {
-      setStep('customize')
+      goTo('customize')
       return
     }
     void routeToUnlock()
   }, [hasUnlocked, routeToUnlock])
 
   const handleChangeBasePhoto = useCallback(() => {
-    setStep('basePhoto')
+    goTo('basePhoto')
   }, [])
 
   const handleChangeUserPhoto = useCallback(() => {
-    setStep('customUpload')
+    goTo('customUpload')
   }, [])
 
-  const handleAnalyze = useCallback(() => setStep('analyzing'), [])
+  const handleAnalyze = useCallback(() => goTo('analyzing'), [])
 
   const handleAnalysisComplete = useCallback((result: CelebrityResult & { analysisId?: string }) => {
     setCelebrity(result)
     if (result.analysisId) setAnalysisId(result.analysisId)
     prefetchCelebrityImage(result.name)
-    setStep('teaser')
+    goTo('teaser')
   }, [])
 
   const handleReveal = useCallback(() => {
@@ -427,20 +460,20 @@ export default function HomePage() {
       })
       applyAccountFlags(data)
       if (accountHasUnlimitedAccess(data)) {
-        setStep(appMode === 'match' ? 'result' : 'customize')
+        goTo(appMode === 'match' ? 'result' : 'customize')
         return
       }
     } catch {
       // ignore
     }
 
-    setStep('payment')
+    goTo('payment')
   }, [sessionId, userEmail, appMode, applyAccountFlags])
 
   const handlePaymentSuccess = useCallback((newBalance: number) => {
     setCreditsBalance(newBalance)
     setHasUnlocked(true)
-    setStep(appMode === 'match' ? 'result' : 'customize')
+    goTo(appMode === 'match' ? 'result' : 'customize')
   }, [appMode])
 
   // Retour Google OAuth depuis le SignupGate → reprendre le funnel (paiement)
@@ -454,7 +487,7 @@ export default function HomePage() {
     async function resumeAfterGoogle() {
       const ctx = readOAuthReturnContext()
       clearOAuthReturnContext()
-      window.history.replaceState({}, '', '/')
+      window.history.replaceState({}, '', window.location.pathname)
 
       const { data: { user } } = await supabase.auth.getUser()
       if (cancelled || !user) return
@@ -506,7 +539,7 @@ export default function HomePage() {
         })
         applyAccountFlags(data)
         if (accountHasUnlimitedAccess(data)) {
-          setStep((ctx?.appMode ?? appMode) === 'match' ? 'result' : 'customize')
+          goTo((ctx?.appMode ?? appMode) === 'match' ? 'result' : 'customize')
           return
         }
       } catch {
@@ -514,9 +547,9 @@ export default function HomePage() {
       }
 
       if (ctx?.celebrity) {
-        setStep('payment')
+        goTo('payment')
       } else {
-        setStep('modeChoice')
+        goTo('modeChoice')
       }
     }
 
@@ -542,8 +575,8 @@ export default function HomePage() {
       if (ctx?.basePhoto) setBasePhoto(ctx.basePhoto)
       if (typeof ctx?.userHeightCm === 'number') setUserHeightCm(ctx.userHeightCm)
       if (ctx?.appMode === 'match' || ctx?.appMode === 'custom') setAppMode(ctx.appMode)
-      if (ctx?.celebrity) setStep('payment')
-      window.history.replaceState({}, '', '/')
+      if (ctx?.celebrity) goTo('payment', ctx.appMode === 'custom' ? 'custom' : ctx.appMode === 'match' ? 'match' : undefined)
+      window.history.replaceState({}, '', window.location.pathname)
       return
     }
 
@@ -593,16 +626,16 @@ export default function HomePage() {
         // (sinon écran blanc : le rendu est conditionné par `celebrity && …`).
         const mode = ctx?.appMode ?? appMode
         if (ctx?.celebrity && mode === 'match') {
-          setStep('result')
+          goTo('result', 'match')
         } else if (ctx?.celebrity && mode === 'custom') {
-          setStep('customize')
+          goTo('customize', 'custom')
         } else {
-          setStep('modeChoice')
+          goTo('modeChoice', null)
         }
       } catch (err) {
         console.error('[checkout return]', err)
       } finally {
-        window.history.replaceState({}, '', '/')
+        window.history.replaceState({}, '', window.location.pathname)
       }
     }
 
@@ -612,20 +645,20 @@ export default function HomePage() {
 
   const handleInsufficientCredits = useCallback(() => {
     if (unlimitedAccess) return
-    setStep('payment')
+    goTo('payment')
   }, [unlimitedAccess])
 
   const handleContinueToScene = useCallback(() => {
-    setStep('customize')
+    goTo('customize')
   }, [])
 
   const handleSceneSubmit = useCallback((request: GenerationRequest) => {
     setGenerationRequest(request)
-    setStep('generating')
+    goTo('generating')
   }, [])
 
   const handleBackToCustomize = useCallback(() => {
-    setStep('customize')
+    goTo('customize')
   }, [])
 
   const handleGenerationComplete = useCallback((imageBase64: string, genId?: string, newBalance?: number) => {
@@ -640,7 +673,7 @@ export default function HomePage() {
       })
     }
     setHasCompletedGeneration()
-    setStep('success')
+    goTo('success')
   }, [sessionId, userId, userEmail, refreshAccount])
 
   const handleReset = useCallback(() => {
@@ -651,27 +684,26 @@ export default function HomePage() {
     setAnalysisId('')
     setGenerationId('')
     setGenerationRequest(null)
-    setAppMode(null)
     setCreationMode(undefined)
     setBasePhoto('')
     setHasUnlocked(false)
-    setStep('modeChoice')
-  }, [])
+    goTo('modeChoice', null)
+  }, [goTo])
 
   /** Régénérer : on garde star, mode, photo source et options de scène. */
   const handleRegenerate = useCallback(() => {
     setGeneratedImage('')
-    setStep('customize')
+    goTo('customize')
   }, [])
 
   /** Retour arrière sans perdre ce qui est déjà renseigné (étapes du choix de mode). */
   const handleBack = useCallback(() => {
     if (step === 'basePhoto' || step === 'customUpload') {
-      setStep('customCelebrity')
+      goTo('customCelebrity')
       return
     }
     if (step === 'customCelebrity') {
-      setStep('creationChoice')
+      goTo('creationChoice')
       return
     }
     if (step === 'creationChoice') {
@@ -679,7 +711,7 @@ export default function HomePage() {
       return
     }
     handleReset()
-  }, [step, handleReset])
+  }, [step, handleReset, goTo])
 
   // ── Back button visibility ─────────────────────────────────────────────────
   const noBack: Step[] = ['modeChoice', 'hero', 'analyzing', 'generating', 'signup', 'payment', 'result', 'customize', 'success']
