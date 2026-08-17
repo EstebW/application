@@ -87,9 +87,17 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
         celebrityImageBase64,
         generationMode: generationRequest.mode,
         creationMode: resolvedCreationMode,
+        sceneSource: isPhotoEdit ? undefined : generationRequest.sceneSource,
         // photo_edit : la scène est la photo elle-même, le backend refuse photoScene.
-        photoScene: isPhotoEdit ? undefined : generationRequest.photoScene,
-        customPrompt: generationRequest.customPrompt,
+        // user_photo : le décor vient de image_input[0], pas d'une scène inventée.
+        photoScene:
+          isPhotoEdit || generationRequest.sceneSource === 'user_photo'
+            ? undefined
+            : generationRequest.photoScene,
+        customPrompt:
+          generationRequest.sceneSource === 'user_photo'
+            ? undefined
+            : generationRequest.customPrompt,
         interaction: generationRequest.interaction,
         // Le backend ne fait pas confiance à celebrityId : il le recalcule à
         // partir du nom pour retrouver la fiche taille de la star.

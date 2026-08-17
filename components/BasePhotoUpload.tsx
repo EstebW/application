@@ -5,6 +5,7 @@ import { motion } from 'framer-motion'
 import {
   AlertTriangle,
   ArrowRight,
+  Camera,
   Check,
   ImageIcon,
   ImagePlus,
@@ -52,7 +53,8 @@ export default function BasePhotoUpload({ celebrityName, initialPhoto, onSubmit 
   const [checking, setChecking] = useState(false)
   const [error, setError] = useState('')
   const [validation, setValidation] = useState<BasePhotoValidation | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const cameraRef = useRef<HTMLInputElement>(null)
+  const galleryRef = useRef<HTMLInputElement>(null)
 
   const analyse = useCallback(async (src: string) => {
     setChecking(true)
@@ -99,11 +101,24 @@ export default function BasePhotoUpload({ celebrityName, initialPhoto, onSubmit 
     <motion.div variants={wrap} initial="hidden" animate="show" className="flex flex-col items-center w-full gap-6 pt-4">
 
       <input
-        ref={inputRef}
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="user"
+        className="sr-only"
+        aria-label="Prendre un selfie"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) void handleFile(f)
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={galleryRef}
         type="file"
         accept={ACCEPTED_BASE_PHOTO_TYPES.join(',')}
         className="sr-only"
-        aria-label="Choisir la photo de départ"
+        aria-label="Choisir un selfie depuis la galerie"
         onChange={(e) => {
           const f = e.target.files?.[0]
           if (f) void handleFile(f)
@@ -112,18 +127,16 @@ export default function BasePhotoUpload({ celebrityName, initialPhoto, onSubmit 
       />
 
       <motion.div variants={up} className="text-center space-y-2">
-        <p className="text-[#D4AF37] text-[11px] font-bold uppercase tracking-[0.15em]">Étape 4</p>
+        <p className="text-[#D4AF37] text-[11px] font-bold uppercase tracking-[0.15em]">Étape 3</p>
         <h2
           className="text-3xl font-black text-white leading-tight"
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
         >
-          Choisis ta photo
-          <br />
-          de départ
+          Prends un selfie
         </h2>
         <p className="text-[#808080] text-sm leading-relaxed">
-          Utilise une photo avec suffisamment d&apos;espace autour de toi pour que la star puisse être
-          ajoutée naturellement.
+          On ajoute {celebrityName} directement dans ton selfie, sans changer ton visage ni le décor.
+          Laisse un peu d&apos;espace autour de toi.
         </p>
       </motion.div>
 
@@ -162,7 +175,7 @@ export default function BasePhotoUpload({ celebrityName, initialPhoto, onSubmit 
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => inputRef.current?.click()}
+                onClick={() => cameraRef.current?.click()}
                 className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
                 style={{
                   background: 'rgba(255,255,255,0.04)',
@@ -171,7 +184,7 @@ export default function BasePhotoUpload({ celebrityName, initialPhoto, onSubmit 
                 }}
               >
                 <RefreshCw size={14} />
-                Remplacer
+                Reprendre
               </button>
               <button
                 type="button"
@@ -189,23 +202,37 @@ export default function BasePhotoUpload({ celebrityName, initialPhoto, onSubmit 
             </div>
           </>
         ) : (
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            className="w-full py-10 rounded-2xl flex flex-col items-center justify-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
-            style={{ background: 'rgba(255,255,255,0.02)', border: '1.5px dashed rgba(212,175,55,0.35)' }}
-          >
-            <div
-              className="w-12 h-12 rounded-2xl flex items-center justify-center"
-              style={{ background: 'rgba(212,175,55,0.12)' }}
+          <div className="space-y-3">
+            <motion.button
+              type="button"
+              onClick={() => cameraRef.current?.click()}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              className="w-full py-5 rounded-2xl text-lg font-black tracking-wide flex items-center justify-center gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
+              style={{
+                background: 'linear-gradient(135deg,#D4AF37,#F0D060)',
+                color: '#0A0A0A',
+                boxShadow: '0 8px 32px rgba(212,175,55,0.25)',
+              }}
             >
-              <ImagePlus size={20} className="text-[#D4AF37]" />
-            </div>
-            <span className="text-[#A0A0A0] text-sm font-semibold">Choisir une photo</span>
-            <span className="text-[#555] text-[11px]">
-              JPEG, PNG ou WebP · {formatBytes(MAX_BASE_PHOTO_BYTES)} max
-            </span>
-          </button>
+              <Camera size={22} className="flex-shrink-0" />
+              Ouvrir l&apos;appareil
+            </motion.button>
+            <button
+              type="button"
+              onClick={() => galleryRef.current?.click()}
+              className="w-full py-4 rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
+              style={{ background: 'rgba(255,255,255,0.02)', border: '1.5px dashed rgba(212,175,55,0.35)' }}
+            >
+              <div className="flex items-center gap-2">
+                <ImagePlus size={16} className="text-[#D4AF37]" />
+                <span className="text-[#A0A0A0] text-sm font-semibold">J&apos;ai déjà un selfie</span>
+              </div>
+              <span className="text-[#555] text-[11px]">
+                JPEG, PNG ou WebP · {formatBytes(MAX_BASE_PHOTO_BYTES)} max
+              </span>
+            </button>
+          </div>
         )}
 
         {error && (
@@ -265,7 +292,7 @@ export default function BasePhotoUpload({ celebrityName, initialPhoto, onSubmit 
           }}
         >
           <ImageIcon size={18} className="flex-shrink-0" />
-          Ajouter {celebrityName} à cette photo
+          Ajouter {celebrityName} à mon selfie
           <ArrowRight size={18} className="flex-shrink-0" />
         </motion.button>
         <p className="text-center text-[#555] text-xs mt-2">

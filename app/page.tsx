@@ -51,7 +51,7 @@ import {
 
 // ── Deux funnels :
 // 1) Match : photo → analyse → teaser flouté → (compte) → paiement → révélation jumeau → scène → génération
-// 2) Custom : photo → star → mode de création → (photo de base) → (compte) → paiement → scène → génération
+// 2) Custom : mode → star → photo (selfie si photo_edit) → (compte) → paiement → scène → génération
 type Step =
   | 'modeChoice'
   | 'hero'
@@ -112,33 +112,33 @@ function getStepperState(
     return { labels, index }
   }
 
-  // Custom / défaut — « Mode » = choix créer une nouvelle photo / ajouter la star
-  const onModeSteps = step === 'creationChoice' || step === 'basePhoto'
+  // Custom — Mode → Star → Photo → Créa
+  const onPhotoSteps = step === 'customUpload' || step === 'basePhoto'
 
   if (loggedIn && !needsPay) {
-    const labels = ['Photo', 'Star', 'Mode', 'Créa'] as const
+    const labels = ['Mode', 'Star', 'Photo', 'Créa'] as const
     const index =
-      step === 'modeChoice' || step === 'customUpload' ? 0
+      step === 'modeChoice' || step === 'creationChoice' ? 0
         : step === 'customCelebrity' ? 1
-          : onModeSteps ? 2
+          : onPhotoSteps ? 2
             : 3
     return { labels, index }
   }
   if (loggedIn) {
-    const labels = ['Photo', 'Star', 'Mode', 'Paiement', 'Créa'] as const
+    const labels = ['Mode', 'Star', 'Photo', 'Paiement', 'Créa'] as const
     const index =
-      step === 'modeChoice' || step === 'customUpload' ? 0
+      step === 'modeChoice' || step === 'creationChoice' ? 0
         : step === 'customCelebrity' ? 1
-          : onModeSteps || step === 'signup' ? 2
+          : onPhotoSteps || step === 'signup' ? 2
             : step === 'payment' ? 3
               : 4
     return { labels, index }
   }
-  const labels = ['Photo', 'Star', 'Mode', 'Compte', 'Paiement'] as const
+  const labels = ['Mode', 'Star', 'Photo', 'Compte', 'Paiement'] as const
   const index =
-    step === 'modeChoice' || step === 'customUpload' ? 0
+    step === 'modeChoice' || step === 'creationChoice' ? 0
       : step === 'customCelebrity' ? 1
-        : onModeSteps ? 2
+        : onPhotoSteps ? 2
           : step === 'signup' ? 3
             : 4
   return { labels, index }
@@ -157,7 +157,7 @@ export default function HomePage() {
   const [celebrity, setCelebrity] = useState<CelebrityResult | null>(null)
   const [celebrityPhoto, setCelebrityPhoto] = useState('')
   // Parcours « Choisis ta star » uniquement — le funnel « jumeau » reste en full_generation.
-  const [creationMode, setCreationMode] = useState<CelebrityCreationMode>(DEFAULT_CREATION_MODE)
+  const [creationMode, setCreationMode] = useState<CelebrityCreationMode | undefined>()
   const [basePhoto, setBasePhoto] = useState('')
   // Taille utilisateur — parcours « Choisis ta star » uniquement.
   const [userHeightCm, setUserHeightCm] = useState<number | undefined>()
@@ -317,7 +317,7 @@ export default function HomePage() {
 
   const handleSelectCustomMode = useCallback(() => {
     setAppMode('custom')
-    setStep('customUpload')
+    setStep('creationChoice')
   }, [])
 
   const handlePhotoSelected = useCallback((_file: File, preview: string) => {
@@ -325,10 +325,18 @@ export default function HomePage() {
     setStep('upload')
   }, [])
 
+  const continueAfterCustomPhoto = useCallback(() => {
+    if (hasUnlocked) {
+      setStep('customize')
+      return
+    }
+    void routeToUnlock()
+  }, [hasUnlocked, routeToUnlock])
+
   const handleCustomPhotoSelected = useCallback((_file: File, preview: string) => {
     setPhotoPreview(preview)
-    setStep('customCelebrity')
-  }, [])
+    continueAfterCustomPhoto()
+  }, [continueAfterCustomPhoto])
 
   const handleCustomCelebritySubmit = useCallback((data: {
     name: string
@@ -347,21 +355,23 @@ export default function HomePage() {
       fun_fact: '',
     })
     setCelebrityPhoto(data.celebrityImageBase64)
-    setStep('creationChoice')
-  }, [])
-
-  const handleCreationModeSubmit = useCallback((mode: CelebrityCreationMode) => {
-    setCreationMode(mode)
-    if (mode === 'photo_edit') {
+    if (creationMode === 'photo_edit') {
       setStep('basePhoto')
       return
     }
-    void routeToUnlock()
-  }, [routeToUnlock])
+    setStep('customUpload')
+  }, [creationMode])
+
+  const handleCreationModeSubmit = useCallback((mode: CelebrityCreationMode) => {
+    setCreationMode(mode)
+    if (mode === 'full_generation') setBasePhoto('')
+    setStep('customCelebrity')
+  }, [])
 
   // Changer de photo après le paiement ne doit pas renvoyer sur le paywall.
   const handleBasePhotoSubmit = useCallback((photo: string) => {
     setBasePhoto(photo)
+    setPhotoPreview(photo)
     if (hasUnlocked) {
       setStep('customize')
       return
@@ -371,6 +381,10 @@ export default function HomePage() {
 
   const handleChangeBasePhoto = useCallback(() => {
     setStep('basePhoto')
+  }, [])
+
+  const handleChangeUserPhoto = useCallback(() => {
+    setStep('customUpload')
   }, [])
 
   const handleAnalyze = useCallback(() => setStep('analyzing'), [])
@@ -638,7 +652,7 @@ export default function HomePage() {
     setGenerationId('')
     setGenerationRequest(null)
     setAppMode(null)
-    setCreationMode(DEFAULT_CREATION_MODE)
+    setCreationMode(undefined)
     setBasePhoto('')
     setHasUnlocked(false)
     setStep('modeChoice')
@@ -652,12 +666,16 @@ export default function HomePage() {
 
   /** Retour arrière sans perdre ce qui est déjà renseigné (étapes du choix de mode). */
   const handleBack = useCallback(() => {
-    if (step === 'basePhoto') {
+    if (step === 'basePhoto' || step === 'customUpload') {
+      setStep('customCelebrity')
+      return
+    }
+    if (step === 'customCelebrity') {
       setStep('creationChoice')
       return
     }
     if (step === 'creationChoice') {
-      setStep('customCelebrity')
+      handleReset()
       return
     }
     handleReset()
@@ -669,7 +687,9 @@ export default function HomePage() {
 
   /** photo_edit : la photo de base remplace le selfie comme image principale. */
   const generationImage =
-    appMode === 'custom' && creationMode === 'photo_edit' && basePhoto ? basePhoto : photoPreview
+    appMode === 'custom' && creationMode === 'photo_edit' && basePhoto
+      ? basePhoto
+      : photoPreview
 
   return (
     <div className="relative min-h-screen bg-[#0A0A0A] flex flex-col">
@@ -774,10 +794,15 @@ export default function HomePage() {
             </motion.div>
           )}
 
-          {step === 'customUpload' && (
-            <motion.div key="customUpload" className="px-5"
+          {step === 'creationChoice' && (
+            <motion.div key="creationChoice" className="px-5"
               variants={slideVariants} initial="enter" animate="center" exit="exit">
-              <CustomPhotoUpload onPhotoSelected={handleCustomPhotoSelected} />
+              <CreationModeChoice
+                celebrityName={celebrity?.name}
+                celebrityImageSrc={celebrityPhoto || undefined}
+                value={creationMode}
+                onSubmit={handleCreationModeSubmit}
+              />
             </motion.div>
           )}
 
@@ -785,7 +810,7 @@ export default function HomePage() {
             <motion.div key="customCelebrity" className="px-5"
               variants={slideVariants} initial="enter" animate="center" exit="exit">
               <CustomCelebrityForm
-                preview={photoPreview}
+                preview={photoPreview || undefined}
                 initialName={celebrity?.name}
                 initialDomain={celebrity?.celebrity_domain}
                 initialPhoto={celebrityPhoto}
@@ -795,14 +820,14 @@ export default function HomePage() {
             </motion.div>
           )}
 
-          {step === 'creationChoice' && celebrity && (
-            <motion.div key="creationChoice" className="px-5"
+          {step === 'customUpload' && (
+            <motion.div key="customUpload" className="px-5"
               variants={slideVariants} initial="enter" animate="center" exit="exit">
-              <CreationModeChoice
-                celebrityName={celebrity.name}
-                celebrityImageSrc={celebrityPhoto || undefined}
-                value={creationMode}
-                onSubmit={handleCreationModeSubmit}
+              <CustomPhotoUpload
+                celebrityName={celebrity?.name}
+                initialPreview={photoPreview || undefined}
+                onPhotoSelected={handleCustomPhotoSelected}
+                onContinueExisting={photoPreview ? continueAfterCustomPhoto : undefined}
               />
             </motion.div>
           )}
@@ -812,7 +837,7 @@ export default function HomePage() {
               variants={slideVariants} initial="enter" animate="center" exit="exit">
               <BasePhotoUpload
                 celebrityName={celebrity.name}
-                initialPhoto={basePhoto || photoPreview || undefined}
+                initialPhoto={basePhoto || undefined}
                 onSubmit={handleBasePhotoSubmit}
               />
             </motion.div>
@@ -927,10 +952,13 @@ export default function HomePage() {
                 celebrity={celebrity}
                 creditsBalance={creditsBalance}
                 hasUnlimitedAccess={unlimitedAccess}
-                creationMode={appMode === 'custom' ? creationMode : DEFAULT_CREATION_MODE}
+                creationMode={appMode === 'custom' ? (creationMode ?? DEFAULT_CREATION_MODE) : DEFAULT_CREATION_MODE}
                 basePhoto={basePhoto || undefined}
+                userPhoto={photoPreview || undefined}
                 initialRequest={generationRequest ?? undefined}
                 onChangeBasePhoto={handleChangeBasePhoto}
+                onChangeUserPhoto={appMode === 'custom' ? handleChangeUserPhoto : undefined}
+                enableSceneSource={appMode === 'custom'}
                 onSubmit={handleSceneSubmit}
                 onNeedCredits={handleInsufficientCredits}
               />
@@ -946,7 +974,7 @@ export default function HomePage() {
                 celebrity={celebrity}
                 celebrityImageBase64={celebrityPhoto || undefined}
                 generationRequest={generationRequest}
-                creationMode={appMode === 'custom' ? creationMode : DEFAULT_CREATION_MODE}
+                creationMode={appMode === 'custom' ? (creationMode ?? DEFAULT_CREATION_MODE) : DEFAULT_CREATION_MODE}
                 userHeightCm={appMode === 'custom' ? userHeightCm : undefined}
                 sessionId={sessionId}
                 userId={userId}

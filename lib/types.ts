@@ -45,8 +45,8 @@ export type PhotoGenerationMode = 'presets' | 'custom'
 
 /**
  * Approche de création, proposée uniquement dans le parcours « Choisis ta star ».
- * - full_generation : on invente une nouvelle scène, la photo user sert de référence d'identité.
- * - photo_edit      : la photo user est la photo de base immuable, on y ajoute la star.
+ * - full_generation : nouvelle photo — décor inventé, ou décor repris de la photo user.
+ * - photo_edit      : selfie immuable, on y ajoute la star.
  *
  * Compatibilité : les générations créées avant cette fonctionnalité (et tout le parcours
  * « jumeau célèbre ») n'ont pas de creationMode et sont traitées comme 'full_generation'.
@@ -56,6 +56,13 @@ export type PhotoGenerationMode = 'presets' | 'custom'
 export type CelebrityCreationMode = 'full_generation' | 'photo_edit'
 
 export const DEFAULT_CREATION_MODE: CelebrityCreationMode = 'full_generation'
+
+/**
+ * Pour « Créer une nouvelle photo » uniquement.
+ * - invented   : scène guidée ou prompt libre (comportement historique).
+ * - user_photo : on garde le décor / l’ambiance de la photo de l’utilisateur.
+ */
+export type SceneSource = 'invented' | 'user_photo'
 
 /** Interaction souhaitée entre l'utilisateur et la star — toujours facultative. */
 export interface InteractionOption {
@@ -69,6 +76,8 @@ export interface InteractionOption {
 export interface GenerationRequest {
   mode: PhotoGenerationMode
   creationMode?: CelebrityCreationMode
+  /** full_generation : scène inventée (défaut) ou décor de la photo utilisateur */
+  sceneSource?: SceneSource
   photoScene?: PhotoScene
   customPrompt?: string
   /** Facultatif — n'autorise jamais à contourner la préservation d'identité */
@@ -100,6 +109,8 @@ export interface PhotoGenerationContext extends HeightContext {
   mode: PhotoGenerationMode
   /** Absent = 'full_generation' (générations historiques) */
   creationMode?: CelebrityCreationMode
+  /** full_generation : décor inventé ou repris de la photo utilisateur */
+  sceneSource?: SceneSource
   scene?: PhotoScene
   customPrompt?: string
   interaction?: string

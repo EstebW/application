@@ -131,6 +131,7 @@ interface PhotoScene {
 /** Doit rester aligné sur CelebrityCreationMode dans lib/types.ts.
  *  Absent = 'full_generation' (générations historiques et parcours « jumeau célèbre »). */
 type CelebrityCreationMode = 'full_generation' | 'photo_edit'
+type SceneSource = 'invented' | 'user_photo'
 
 /** Doit rester aligné sur CelebrityHeightConfidence dans lib/height.ts. */
 type CelebrityHeightConfidence = 'verified' | 'probable' | 'unknown'
@@ -143,6 +144,7 @@ interface PhotoGenerationContext {
   funFact?: string
   mode: 'presets' | 'custom'
   creationMode?: CelebrityCreationMode
+  sceneSource?: SceneSource
   scene?: PhotoScene
   customPrompt?: string
   interaction?: string
@@ -848,6 +850,7 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
     customPrompt,
     interaction,
     hasCelebrityReferenceImage,
+    sceneSource,
   } = ctx
 
   const dual = Boolean(hasCelebrityReferenceImage)
@@ -914,6 +917,36 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   // Les lignes vides sont filtrées en fin de fonction : le bloc est pré-joint
   // pour conserver ses paragraphes.
   const heightSection = heightConsistencyBlock(ctx).join('\n')
+
+  if (sceneSource === 'user_photo') {
+    return [
+      opener,
+      '',
+      ...facePreservationBlock(dual),
+      '',
+      ...photorealismBlock(celebrityName),
+      '',
+      ...sceneAdaptiveWardrobeBlock(celebrityName),
+      '',
+      heightSection,
+      '',
+      'KEEP THE USER PHOTO SCENE (full_generation — not a pixel-locked edit):',
+      '- image_input[0] is BOTH Person A identity AND the scene to keep.',
+      '- Recreate a NEW candid photo of Person A with the celebrity in the SAME place, lighting, time of day, and overall atmosphere as image_input[0].',
+      '- Keep Person A’s clothes from the source photo unless a tiny natural adjustment is needed.',
+      '- Dress the celebrity to belong in that same real setting — not a studio, not a red carpet.',
+      '- Do NOT invent a new location (no karaoke, IKEA, festival, etc.).',
+      '- Do NOT rebuild the environment from scratch.',
+      interactionLine,
+      '',
+      'SUBJECTS:',
+      ...subjectLines,
+      '',
+      ...requirements,
+      '',
+      ...finalReminder,
+    ].filter(Boolean).join('\n')
+  }
 
   if (mode === 'custom' && customPrompt) {
     const userPrompt = sanitizeSceneText(customPrompt)
@@ -1723,6 +1756,7 @@ Deno.serve(async (req: Request) => {
       celebrityImageBase64?: string
       generationMode?: 'presets' | 'custom'
       creationMode?: string
+      sceneSource?: string
       photoScene?: PhotoScene
       customPrompt?: string
       interaction?: string
@@ -1762,6 +1796,17 @@ Deno.serve(async (req: Request) => {
     const creationMode: CelebrityCreationMode =
       body.creationMode === 'photo_edit' ? 'photo_edit' : 'full_generation'
 
+    if (body.sceneSource && body.sceneSource !== 'invented' && body.sceneSource !== 'user_photo') {
+      throw new Error('sceneSource invalide (attendu "invented" ou "user_photo")')
+    }
+    if (creationMode === 'photo_edit' && body.sceneSource === 'user_photo') {
+      throw new Error('sceneSource interdit en mode photo_edit')
+    }
+    const sceneSource: SceneSource | undefined =
+      creationMode === 'full_generation'
+        ? (body.sceneSource === 'user_photo' ? 'user_photo' : 'invented')
+        : undefined
+
     if (interaction !== undefined && !getInteractionPrompt(interaction)) {
       throw new Error('interaction inconnue')
     }
@@ -1772,6 +1817,10 @@ Deno.serve(async (req: Request) => {
       // La photo de base remplace la scène : mélanger les deux serait incohérent.
       if (photoScene) {
         throw new Error('photoScene interdit en mode photo_edit (la photo importée est la scène)')
+      }
+    } else if (sceneSource === 'user_photo') {
+      if (photoScene) {
+        throw new Error('photoScene interdit quand on garde la scène de la photo utilisateur')
       }
     } else if (mode === 'custom') {
       if (!customPrompt?.trim() || customPrompt.trim().length < 20) {
@@ -1800,13 +1849,16 @@ Deno.serve(async (req: Request) => {
       funFact: typeof funFact === 'string' ? funFact : undefined,
       mode,
       creationMode,
-      scene: creationMode === 'full_generation' && mode === 'presets' ? photoScene : undefined,
+      sceneSource,
+      scene: creationMode === 'full_generation' && sceneSource !== 'user_photo' && mode === 'presets' ? photoScene : undefined,
       customPrompt:
         creationMode === 'photo_edit'
           ? customPrompt?.trim() || undefined
-          : mode === 'custom'
-            ? customPrompt?.trim()
-            : undefined,
+          : sceneSource === 'user_photo'
+            ? undefined
+            : mode === 'custom'
+              ? customPrompt?.trim()
+              : undefined,
       interaction: interaction?.trim() || undefined,
       hasCelebrityReferenceImage: Boolean(celebrityImageBase64),
       userHeightCm,

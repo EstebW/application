@@ -7,7 +7,7 @@ import UserHeightField from './UserHeightField'
 import { parseUserHeightCm } from '@/lib/height'
 
 interface CustomCelebrityFormProps {
-  preview: string
+  preview?: string
   /** Valeurs déjà saisies — restaurées lors d'un retour en arrière */
   initialName?: string
   initialDomain?: string
@@ -67,16 +67,14 @@ export default function CustomCelebrityForm({
   return (
     <motion.div variants={wrap} initial="hidden" animate="show" className="flex flex-col items-center w-full gap-6 pt-4">
 
-      <motion.div variants={up} className="flex justify-center">
-        <div className="w-20 h-20 rounded-2xl overflow-hidden" style={{ border: '2px solid rgba(168,85,247,0.4)' }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="Ta photo" className="w-full h-full object-cover" />
-        </div>
-      </motion.div>
-
-      <motion.div variants={up} className="w-full">
-        <UserHeightField value={heightInput} onChange={setHeightInput} />
-      </motion.div>
+      {preview && (
+        <motion.div variants={up} className="flex justify-center">
+          <div className="w-20 h-20 rounded-2xl overflow-hidden" style={{ border: '2px solid rgba(168,85,247,0.4)' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview} alt="Ta photo" className="w-full h-full object-cover" />
+          </div>
+        </motion.div>
+      )}
 
       <motion.div variants={up} className="text-center space-y-2">
         <p className="text-[#A855F7] text-[11px] font-bold uppercase tracking-[0.15em]">Étape 2</p>
@@ -89,6 +87,10 @@ export default function CustomCelebrityForm({
           rencontrer ?
         </h2>
         <p className="text-[#808080] text-sm">Tape n&apos;importe quel nom de célébrité</p>
+      </motion.div>
+
+      <motion.div variants={up} className="w-full">
+        <UserHeightField value={heightInput} onChange={setHeightInput} />
       </motion.div>
 
       <motion.div variants={up} className="w-full space-y-2">

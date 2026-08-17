@@ -7,7 +7,7 @@ import CelebrityPortrait from './CelebrityPortrait'
 import type { CelebrityCreationMode } from '@/lib/types'
 
 interface CreationModeChoiceProps {
-  celebrityName: string
+  celebrityName?: string
   celebrityImageSrc?: string
   /** Mode déjà choisi — conservé lors d'un retour en arrière */
   value?: CelebrityCreationMode
@@ -37,7 +37,8 @@ const OPTIONS: {
   {
     id: 'full_generation',
     title: 'Créer une nouvelle photo',
-    description: 'Nous imaginons une nouvelle scène avec toi et la star dans le décor de ton choix.',
+    description:
+      'On crée une nouvelle photo avec toi et la star. Ensuite tu pourras inventer le décor, ou garder celui de ta photo.',
     badge: 'Plus créatif',
     icon: Wand2,
     accent: '#A855F7',
@@ -48,7 +49,8 @@ const OPTIONS: {
   {
     id: 'photo_edit',
     title: 'Ajouter la star à ma photo',
-    description: 'Utilise une vraie photo et ajoute naturellement la star sans changer ton visage ni le décor.',
+    description:
+      'Prends un selfie : on ajoute la star dans ta photo, sans changer ton visage ni le décor.',
     badge: 'Plus réaliste · Recommandé',
     icon: ImagePlus,
     accent: '#D4AF37',
@@ -73,18 +75,20 @@ export default function CreationModeChoice({
   return (
     <motion.div variants={wrap} initial="hidden" animate="show" className="flex flex-col items-center w-full gap-6 pt-4">
 
-      <motion.div variants={up} className="flex justify-center">
-        <CelebrityPortrait
-          name={celebrityName}
-          imageSrc={celebrityImageSrc}
-          size="md"
-          shape="rounded"
-          badgeLabel="first"
-        />
-      </motion.div>
+      {celebrityName && (
+        <motion.div variants={up} className="flex justify-center">
+          <CelebrityPortrait
+            name={celebrityName}
+            imageSrc={celebrityImageSrc}
+            size="md"
+            shape="rounded"
+            badgeLabel="first"
+          />
+        </motion.div>
+      )}
 
       <motion.div variants={up} className="text-center space-y-2">
-        <p className="text-[#D4AF37] text-[11px] font-bold uppercase tracking-[0.15em]">Étape 3</p>
+        <p className="text-[#D4AF37] text-[11px] font-bold uppercase tracking-[0.15em]">Étape 1</p>
         <h2
           className="text-3xl font-black text-white leading-tight"
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
@@ -94,7 +98,9 @@ export default function CreationModeChoice({
           créer ta photo ?
         </h2>
         <p className="text-[#808080] text-sm">
-          Deux approches pour ta photo avec {celebrityName}
+          {celebrityName
+            ? `Deux approches pour ta photo avec ${celebrityName}`
+            : "Choisis d'abord comment tu veux apparaître avec ta star"}
         </p>
       </motion.div>
 

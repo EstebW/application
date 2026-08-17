@@ -291,6 +291,7 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
     customPrompt,
     interaction,
     hasCelebrityReferenceImage,
+    sceneSource,
   } = ctx
 
   const dual = Boolean(hasCelebrityReferenceImage)
@@ -357,6 +358,36 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   // Les lignes vides sont filtrées en fin de fonction : le bloc est pré-joint
   // pour conserver ses paragraphes.
   const heightSection = heightConsistencyBlock(ctx).join('\n')
+
+  if (sceneSource === 'user_photo') {
+    return [
+      opener,
+      '',
+      ...facePreservationBlock(dual),
+      '',
+      ...photorealismBlock(celebrityName),
+      '',
+      ...sceneAdaptiveWardrobeBlock(celebrityName),
+      '',
+      heightSection,
+      '',
+      'KEEP THE USER PHOTO SCENE (full_generation — not a pixel-locked edit):',
+      '- image_input[0] is BOTH Person A identity AND the scene to keep.',
+      '- Recreate a NEW candid photo of Person A with the celebrity in the SAME place, lighting, time of day, and overall atmosphere as image_input[0].',
+      '- Keep Person A’s clothes from the source photo unless a tiny natural adjustment is needed.',
+      '- Dress the celebrity to belong in that same real setting — not a studio, not a red carpet.',
+      '- Do NOT invent a new location (no karaoke, IKEA, festival, etc.).',
+      '- Do NOT rebuild the environment from scratch.',
+      interactionLine,
+      '',
+      'SUBJECTS:',
+      ...subjectLines,
+      '',
+      ...requirements,
+      '',
+      ...finalReminder,
+    ].filter(Boolean).join('\n')
+  }
 
   if (mode === 'custom' && customPrompt) {
     const userPrompt = sanitizeSceneText(customPrompt)

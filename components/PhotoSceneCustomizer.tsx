@@ -2,13 +2,14 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { MapPin, Shirt, Users, ChevronRight, Sparkles, Wand2, LayoutGrid, ImagePlus, RefreshCw } from 'lucide-react'
+import { MapPin, Shirt, Users, ChevronRight, Sparkles, Wand2, LayoutGrid, ImagePlus, RefreshCw, Camera } from 'lucide-react'
 import type {
   CelebrityCreationMode,
   CelebrityResult,
   GenerationRequest,
   PhotoGenerationMode,
   PhotoScene,
+  SceneSource,
 } from '@/lib/types'
 import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { CUSTOM_PROMPT_EXAMPLES, getDefaultScene, getSceneSuggestions } from '@/lib/scene-suggestions'
@@ -23,9 +24,14 @@ interface PhotoSceneCustomizerProps {
   creationMode?: CelebrityCreationMode
   /** Photo de base en mode photo_edit */
   basePhoto?: string
+  /** Photo utilisateur — full_generation, notamment pour garder le décor */
+  userPhoto?: string
   /** Choix précédents — restaurés après un retour ou une régénération */
   initialRequest?: GenerationRequest
   onChangeBasePhoto?: () => void
+  onChangeUserPhoto?: () => void
+  /** Parcours « Choisis ta star » uniquement — jumeau reste sur les scènes inventées */
+  enableSceneSource?: boolean
   onSubmit: (request: GenerationRequest) => void
   onNeedCredits?: () => void
 }
@@ -145,14 +151,18 @@ export default function PhotoSceneCustomizer({
   hasUnlimitedAccess = false,
   creationMode = DEFAULT_CREATION_MODE,
   basePhoto,
+  userPhoto,
   initialRequest,
   onChangeBasePhoto,
+  onChangeUserPhoto,
+  enableSceneSource = false,
   onSubmit,
   onNeedCredits,
 }: PhotoSceneCustomizerProps) {
   const { name, celebrity_domain } = celebrity
   const suggestions = getSceneSuggestions(celebrity_domain)
   const isPhotoEdit = creationMode === 'photo_edit'
+  const [sceneSource, setSceneSource] = useState<SceneSource>(initialRequest?.sceneSource ?? 'invented')
   const [mode, setMode] = useState<PhotoGenerationMode>(initialRequest?.mode ?? 'presets')
   const [scene, setScene] = useState<PhotoScene>(
     () => initialRequest?.photoScene ?? getDefaultScene(celebrity_domain)
@@ -161,12 +171,15 @@ export default function PhotoSceneCustomizer({
   const [interaction, setInteraction] = useState<string | undefined>(initialRequest?.interaction)
   const [editNote, setEditNote] = useState(isPhotoEdit ? initialRequest?.customPrompt ?? '' : '')
 
+  const keepUserScene = !isPhotoEdit && enableSceneSource && sceneSource === 'user_photo'
   const hasCredits = hasUnlimitedAccess || creditsBalance === undefined || creditsBalance > 0
   const canSubmitPresets = scene.location.trim() && scene.outfits.trim() && scene.position.trim()
   const canSubmitCustom = customPrompt.trim().length >= 20
   const canSubmit = isPhotoEdit
     ? hasCredits && Boolean(basePhoto)
-    : hasCredits && (mode === 'presets' ? Boolean(canSubmitPresets) : canSubmitCustom)
+    : keepUserScene
+      ? hasCredits && Boolean(userPhoto)
+      : hasCredits && (mode === 'presets' ? Boolean(canSubmitPresets) : canSubmitCustom)
 
   const handleSubmit = () => {
     if (!hasCredits) {
@@ -183,10 +196,31 @@ export default function PhotoSceneCustomizer({
       })
       return
     }
+    if (enableSceneSource && sceneSource === 'user_photo') {
+      onSubmit({
+        mode: 'presets',
+        creationMode,
+        sceneSource: 'user_photo',
+        interaction,
+      })
+      return
+    }
     if (mode === 'presets') {
-      onSubmit({ mode: 'presets', creationMode, photoScene: scene, interaction })
+      onSubmit({
+        mode: 'presets',
+        creationMode,
+        ...(enableSceneSource ? { sceneSource: 'invented' as const } : {}),
+        photoScene: scene,
+        interaction,
+      })
     } else {
-      onSubmit({ mode: 'custom', creationMode, customPrompt: customPrompt.trim(), interaction })
+      onSubmit({
+        mode: 'custom',
+        creationMode,
+        ...(enableSceneSource ? { sceneSource: 'invented' as const } : {}),
+        customPrompt: customPrompt.trim(),
+        interaction,
+      })
     }
   }
 
@@ -215,11 +249,37 @@ export default function PhotoSceneCustomizer({
         <p className="text-[#808080] text-sm">
           {isPhotoEdit
             ? 'Ta photo et ton visage restent intacts — on ajoute seulement la star'
-            : 'Choisis des scènes guidées ou écris ton propre prompt'}
+            : enableSceneSource
+              ? 'Inventer un décor, ou garder celui de ta photo'
+              : 'Choisis des scènes guidées ou écris ton propre prompt'}
         </p>
       </motion.div>
 
-      {!isPhotoEdit && (
+      {!isPhotoEdit && enableSceneSource && (
+        <motion.div variants={up} className="grid grid-cols-2 gap-2">
+          {([
+            { id: 'invented' as const, label: 'Scène de zéro', icon: Wand2 },
+            { id: 'user_photo' as const, label: 'Garder ma scène', icon: Camera },
+          ]).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setSceneSource(id)}
+              className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
+              style={{
+                background: sceneSource === id ? 'rgba(212,175,55,0.12)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${sceneSource === id ? 'rgba(212,175,55,0.45)' : 'rgba(255,255,255,0.08)'}`,
+                color: sceneSource === id ? '#D4AF37' : '#888',
+              }}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </motion.div>
+      )}
+
+      {!isPhotoEdit && (!enableSceneSource || sceneSource === 'invented') && (
         <motion.div variants={up} className="grid grid-cols-2 gap-2">
           {([
             { id: 'presets' as const, label: 'Scènes guidées', icon: LayoutGrid },
@@ -315,6 +375,44 @@ export default function PhotoSceneCustomizer({
               <p className="text-[#555] text-[10px]">
                 {editNote.length} / {EDIT_NOTE_MAX}
               </p>
+            </div>
+          </div>
+        ) : keepUserScene ? (
+          <div className="space-y-4">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2">
+                <Camera size={14} className="text-[#D4AF37]" />
+                <label className="text-sm font-semibold text-white">Le décor de ta photo</label>
+              </div>
+              <p className="text-[#666] text-xs leading-relaxed">
+                On crée une nouvelle photo avec {name} dans le même lieu, la même lumière et
+                la même ambiance — ce n&apos;est pas un collage sur ta photo d&apos;origine.
+              </p>
+              {userPhoto ? (
+                <div
+                  className="w-full rounded-xl overflow-hidden"
+                  style={{ border: '1px solid rgba(212,175,55,0.3)' }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={userPhoto}
+                    alt="Le décor à conserver"
+                    className="w-full max-h-[240px] object-contain bg-black"
+                  />
+                </div>
+              ) : (
+                <p className="text-[#808080] text-xs">Aucune photo sélectionnée.</p>
+              )}
+              {onChangeUserPhoto && (
+                <button
+                  type="button"
+                  onClick={onChangeUserPhoto}
+                  className="flex items-center gap-2 text-[#D4AF37] text-xs font-semibold py-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] rounded"
+                >
+                  <RefreshCw size={12} />
+                  Changer de photo
+                </button>
+              )}
             </div>
           </div>
         ) : mode === 'presets' ? (
@@ -458,6 +556,11 @@ export default function PhotoSceneCustomizer({
         {isPhotoEdit && !basePhoto && (
           <p className="text-center text-[#555] text-xs">
             Sélectionne d&apos;abord une photo de départ.
+          </p>
+        )}
+        {keepUserScene && !userPhoto && (
+          <p className="text-center text-[#555] text-xs">
+            Ajoute d&apos;abord ta photo pour en garder le décor.
           </p>
         )}
       </motion.div>
