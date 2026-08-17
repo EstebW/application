@@ -5,6 +5,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ProgressBar from './ProgressBar'
 import type { CelebrityResult } from '@/lib/types'
 import { callFunction } from '@/lib/functions'
+import { formatKieError } from '@/lib/kie-errors'
+import {
+  analysisProgressFromElapsed,
+  analysisStepFromElapsed,
+} from '@/lib/analysis-progress'
 
 const STEPS = [
   'Analyse morphologique de ton visage...',
@@ -12,8 +17,6 @@ const STEPS = [
   'Classement des meilleures ressemblances...',
   'Ton jumeau vient d\'être trouvé !',
 ]
-
-import { formatKieError } from '@/lib/kie-errors'
 
 interface AnalysisLoaderProps {
   preview: string
@@ -33,51 +36,30 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
     if (called.current) return
     called.current = true
 
-    // Progress bar animation — min 4 seconds UX
-    const progressInterval = setInterval(() => {
-      setProgress((prev) => {
-        // Slow down near 90% until API responds
-        if (prev >= 90) return prev
-        return prev + 1.5
-      })
-    }, 60)
-
-    // Step text cycling
-    const stepInterval = setInterval(() => {
-      setStepIndex((prev) => Math.min(prev + 1, STEPS.length - 2))
-    }, 1100)
-
-    // Minimum display time before transitioning (2 appels Gemini → analyse plus longue)
-    const MIN_MS = 5200
-
     const t0 = Date.now()
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - t0
+      setProgress(analysisProgressFromElapsed(elapsed))
+      setStepIndex(analysisStepFromElapsed(elapsed))
+    }, 250)
 
     callFunction<CelebrityResult & { analysisId?: string; error?: string }>(
       'analyze',
       { imageBase64, sessionId, userId }
     )
       .then((data) => {
-        clearInterval(stepInterval)
+        clearInterval(progressInterval)
 
         if (data.error) {
           throw new Error(data.error)
         }
 
-        const elapsed = Date.now() - t0
-        const remaining = Math.max(0, MIN_MS - elapsed)
-
-        // Show final step + fill bar, then transition
-        setStepIndex(STEPS.length - 1)
-
-        setTimeout(() => {
-          clearInterval(progressInterval)
-          setProgress(100)
-          setTimeout(() => onComplete(data), 600)
-        }, remaining)
+        setStepIndex(analysisStepFromElapsed(Date.now() - t0, true))
+        setProgress(100)
+        setTimeout(() => onComplete(data), 700)
       })
       .catch((err: unknown) => {
         clearInterval(progressInterval)
-        clearInterval(stepInterval)
         const raw = err instanceof Error ? err.message : 'Erreur inconnue'
         // callFunction peut renvoyer du JSON stringifié
         try {
@@ -94,7 +76,6 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
 
     return () => {
       clearInterval(progressInterval)
-      clearInterval(stepInterval)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

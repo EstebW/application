@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion'
 import { Lock, Sparkles, ChevronRight, Eye } from 'lucide-react'
 import type { CelebrityResult } from '@/lib/types'
+import { getCelebrityFirstName } from '@/lib/celebrity-image'
 
 interface TeaserResultProps {
   celebrity: CelebrityResult
@@ -20,7 +21,10 @@ const up = {
 }
 
 export default function TeaserResult({ celebrity, preview, onReveal }: TeaserResultProps) {
-  const { score, traits, celebrity_domain } = celebrity
+  const { name, score, traits, celebrity_domain } = celebrity
+  const firstName = getCelebrityFirstName(name)
+  const initial = firstName.charAt(0).toUpperCase()
+  const letterCount = firstName.replace(/[^a-zA-ZÀ-ÿ]/g, '').length
 
   return (
     <motion.div variants={wrap} initial="hidden" animate="show" className="flex flex-col items-center gap-6 w-full">
@@ -141,20 +145,28 @@ export default function TeaserResult({ celebrity, preview, onReveal }: TeaserRes
               ))}
             </div>
 
-            {/* Celebrity name — heavily masked */}
-            <div className="rounded-2xl p-4 text-center space-y-2"
+            {/* Celebrity name — indice utile, pas de révélation */}
+            <div className="rounded-2xl p-4 text-center space-y-1.5"
               style={{ background: 'rgba(212,175,55,0.04)', border: '1px solid rgba(212,175,55,0.12)' }}>
               <p className="text-[#606060] text-xs">Ta célébrité jumelle</p>
-              <div className="flex items-center justify-center gap-2">
-                <Lock size={14} className="text-[#D4AF37]/50" />
-                <span className="text-2xl font-black tracking-[0.3em] text-white/20 select-none">
-                  ● ● ● ● ● ●
-                </span>
-                <Lock size={14} className="text-[#D4AF37]/50" />
-              </div>
-              <p className="text-[#D4AF37]/50 text-[10px] font-semibold uppercase tracking-wider">
-                Paye pour révéler
-              </p>
+              {initial ? (
+                <>
+                  <p className="text-white text-base font-semibold">
+                    Le prénom commence par{' '}
+                    <span className="text-[#D4AF37] font-black">{initial}</span>
+                  </p>
+                  {letterCount > 1 && (
+                    <p className="text-[#808080] text-xs">
+                      {letterCount} lettre{letterCount > 1 ? 's' : ''}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div className="flex items-center justify-center gap-2 py-1">
+                  <Lock size={14} className="text-[#D4AF37]/50" />
+                  <span className="text-[#A0A0A0] text-sm">Nom verrouillé</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
