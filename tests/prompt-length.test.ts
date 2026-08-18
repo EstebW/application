@@ -14,7 +14,7 @@ import {
 } from '../lib/scene-suggestions.ts'
 import type { PhotoGenerationContext } from '../lib/types.ts'
 
-const longPlacement = 'Ajouter la célébrité immédiatement à droite de l’utilisateur, mêmes pieds au sol, profondeur caméra comparable, interaction naturelle, visage assez grand pour conserver ses traits, '.repeat(8)
+const longNote = 'Une note optionnelle assez longue pour tester le plafond interne du prompt selfie. '.repeat(10)
 
 const worstPhotoEdit: PhotoGenerationContext = {
   celebrityName: 'Jean-Michel Jarre Extraordinaire',
@@ -22,10 +22,9 @@ const worstPhotoEdit: PhotoGenerationContext = {
   celebrityStyleDescription: 'Look très détaillé avec lunettes, cheveux, veste et accessoires de scène',
   mode: 'custom',
   creationMode: 'photo_edit',
-  customPrompt: 'Une note optionnelle assez longue pour tester le plafond interne du prompt. '.repeat(10),
+  customPrompt: longNote,
   interaction: 'arm_shoulder',
   hasCelebrityReferenceImage: true,
-  celebrityPlacementInstruction: longPlacement,
   userHeightCm: 182,
   celebrityHeightCm: 170,
   celebrityTargetApparentHeightRatio: 170 / 182,
@@ -50,22 +49,28 @@ const worstFullGen: PhotoGenerationContext = {
 }
 
 describe('longueur des prompts KIE', () => {
-  it('reste sous la limite pour photo_edit même avec placement + tailles + note', () => {
+  it('selfie photo_edit reste court et dense', () => {
     const raw = buildPhotoEditPrompt(worstPhotoEdit)
     const prompt = buildPhotoPrompt(worstPhotoEdit)
-    assert.ok(raw.length <= KIE_PROMPT_MAX_CHARS, `photo_edit brut ${raw.length} > ${KIE_PROMPT_MAX_CHARS}`)
-    assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS, `photo_edit ${prompt.length} > ${KIE_PROMPT_MAX_CHARS}`)
-    assert.match(prompt, /SOURCE photo/)
-    assert.match(prompt, /PLACEMENT/)
-    assert.match(prompt, /PHOTOREALISM/)
+    assert.ok(raw.length <= 1800, `photo_edit selfie trop long: ${raw.length} > 1800`)
+    assert.ok(raw.length <= KIE_PROMPT_MAX_CHARS)
+    assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS)
+    assert.match(prompt, /SELFIE EDIT/)
     assert.match(prompt, /SELFIE LOCK/)
-    assert.match(prompt, /same camera plane/)
-    assert.match(prompt, /close natural proximity/)
-    assert.match(prompt, /non-distinctive imperfections/)
     assert.match(prompt, /AI-smooth skin/)
-    assert.doesNotMatch(prompt, /NATURAL MOMENT LOCK/)
-    assert.match(prompt, /unrelated fashion style/)
+    assert.match(prompt, /same camera plane/)
     assert.match(prompt, /182/)
+    assert.doesNotMatch(prompt, /PLACEMENT/)
+    assert.doesNotMatch(prompt, /NATURAL MOMENT LOCK/)
+    assert.doesNotMatch(prompt, /FACIAL IDENTITY LOCK/)
+  })
+
+  it('full_generation garde le prompt qualité complet', () => {
+    const raw = buildFullGenerationPrompt(worstFullGen)
+    assert.match(raw, /FACIAL IDENTITY LOCK/)
+    assert.match(raw, /NATURAL MOMENT LOCK/)
+    assert.match(raw, /PHOTOREALISM/)
+    assert.match(raw, /USER SCENE BRIEF/)
   })
 
   it('reste sous la limite pour full_generation avec scène guidée', () => {

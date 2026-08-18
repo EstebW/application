@@ -551,6 +551,39 @@ function shouldRetryHeightLookup(row: HeightRow): boolean {
   return Date.now() - new Date(row.last_attempt_at).getTime() > HEIGHT_RETRY_UNKNOWN_AFTER_MS
 }
 
+/** Selfie path : DB/mémoire uniquement — pas de Wikidata (économise 0–15 s). */
+async function resolveCelebrityHeightCacheOnly(db: DbClient, celebrityName: string): Promise<CelebrityHeight> {
+  const celebrityId = celebrityIdFromName(celebrityName)
+  if (!celebrityId) return unknownCelebrityHeight('')
+
+  const cached = heightMemoryCache.get(celebrityId)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+
+  try {
+    const { data } = await db
+      .from('celebrity_heights')
+      .select('celebrity_id, height_cm, source_url, verified_at, confidence')
+      .eq('celebrity_id', celebrityId)
+      .maybeSingle()
+    const row = data as Pick<HeightRow, 'celebrity_id' | 'height_cm' | 'source_url' | 'verified_at' | 'confidence'> | null
+    if (row?.height_cm != null) {
+      const value: CelebrityHeight = {
+        celebrityId: row.celebrity_id,
+        heightCm: row.height_cm,
+        sourceUrl: row.source_url,
+        verifiedAt: row.verified_at,
+        confidence: row.confidence,
+      }
+      heightMemoryCache.set(celebrityId, { value, expiresAt: Date.now() + HEIGHT_MEMORY_TTL_MS })
+      return value
+    }
+  } catch (err) {
+    logHeightEvent('cache_read_failed', { celebrityId, error: getErrorMessage(err) })
+  }
+
+  return unknownCelebrityHeight(celebrityId)
+}
+
 /**
  * Taille de la célébrité, résolue côté serveur à partir de son identifiant.
  * Ne jette jamais : une taille introuvable laisse la génération continuer avec
@@ -1170,7 +1203,16 @@ async function analyzePhotoEditComposition(
   }
 }
 
-/** « Ajouter la star à ma photo » — photo source = vérité. Compacté : KIE refuse > 5000 caractères. */
+/** Selfie photo_edit : prompt court (~1K car.) — KIE plus rapide, pas de Gemini placement. */
+function selfiePhotorealismLines(celebrityName: string): string[] {
+  const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
+  return [
+    'LOOK: amateur phone snap — match source grain, lighting, compression. No beauty filter, no AI-smooth skin. Natural pores and texture on BOTH; ordinary imperfections OK, no new distinctive marks.',
+    `${celeb} must inherit the source photo quality — never smoother, sharper, or more retouched than the user.`,
+  ]
+}
+
+/** Selfie « Ajouter la star à ma photo » — court, dense, sans analyse Gemini. */
 function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   const {
     celebrityName,
@@ -1178,61 +1220,36 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     celebrityStyleDescription,
     customPrompt,
     hasCelebrityReferenceImage,
-    celebrityPlacementInstruction,
   } = ctx
   const starName = sanitizeSceneText(celebrityName) || 'the celebrity'
   const domain = sanitizeSceneText(celebrityDomain)
   const style = celebrityStyleDescription ? sanitizeSceneText(celebrityStyleDescription) : ''
   const dual = Boolean(hasCelebrityReferenceImage)
-  const interactionPrompt = getInteractionPrompt('selfie')
-  const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 180) : ''
-  const sceneIntent = sanitizeSceneText(
-    [interactionPrompt, userHint].filter(Boolean).join(' — ')
-  ).slice(0, 220) || 'both looking at the phone camera as if taking a selfie together, heads close'
+  const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 80) : ''
   const starDescription = sanitizeSceneText(
-    dual
-      ? (domain ? `${starName} (${domain})` : starName)
-      : [domain && `${starName} (${domain})`, style].filter(Boolean).join('. ')
-  ).slice(0, 180) || starName
-  const placement = celebrityPlacementInstruction
-    ? sanitizeSceneText(celebrityPlacementInstruction).slice(0, 400)
-    : ''
+    dual ? (domain ? `${starName} (${domain})` : starName) : [domain && `${starName} (${domain})`, style].filter(Boolean).join('. ')
+  ).slice(0, 120) || starName
 
   return [
-    'MODE: ADD THE CELEBRITY TO THE SOURCE PHOTO.',
+    'MODE: SELFIE EDIT — add the celebrity to the user selfie.',
     '',
     'IMAGE ORDER:',
-    '- image_input[0] = SOURCE photo (user + scene). Keep this photo as the visual foundation.',
-    ...(dual
-      ? [`- Second image = FACE/HAIR identity for ${starName}, plus their general personal aesthetic. Do not copy the exact outfit, crop, background, or photo quality.`]
-      : []),
+    '- image_input[0] = user selfie + scene. Keep as the foundation.',
+    ...(dual ? [`- image_input[1] = face/hair for ${starName}. Outfit: adapt to this scene, not a copy of the reference photo.`] : []),
     '',
-    `GOAL: insert ${starName} into a selfie with the user — both looking at the phone camera, celebrity beside them (not behind). Candid amateur smartphone snapshot, not a collage or studio shoot.`,
+    `GOAL: ${starName} beside the user in a shared selfie — same camera plane, both look at the phone, heads close. Candid phone snap, not a collage.`,
     '',
-    'USER: keep the same person — same face, hair, identity, body. Tiny pose tweaks OK for a natural interaction. Do not beautify, rejuvenate, or replace them.',
-    'SCENE: keep the same place, lighting, framing, objects, amateur feel. Do not rebuild the location or invent furniture.',
+    'USER: same person as [0] — face, hair, body locked. Tiny pose tweaks OK. No beautify or replace.',
     ...(dual
-      ? [
-          `CELEBRITY: match face and hair to image_input[1] (not a generic lookalike, not blended with the user). Adapt the outfit to THIS setting while keeping a style consistent with their reference appearance and recognizable personal aesthetic. Do not copy the exact reference outfit, but do not invent a completely unrelated fashion style. Pose/lighting may change; identity must not.`,
-        ]
-      : [`CELEBRITY: ${starDescription}. Dress them for THIS scene.`]),
-    ...(placement
-      ? [
-          'PLACEMENT (use this for LEFT vs RIGHT / where space exists):',
-          placement,
-          'Keep that side/space. If it puts the celebrity behind, farther back, or as a background figure, move them beside the user on the same camera plane instead.',
-        ]
-      : [
-          `Place ${starName} beside the user in the free space, same camera plane, selfie posture: ${sceneIntent}. Ignore that intent if it would rebuild the scene or push them behind.`,
-        ]),
-    'SELFIE LOCK: this is a selfie taken by the user. Place the celebrity next to them on the same camera plane, in the free space (left or right), in close natural proximity — heads close, slight lean-in, relaxed, maybe a light shoulder/arm touch if it fits. Never stiff, never distant, never behind, never a tiny background figure. Both look toward the phone, like a real shared selfie.',
-    'LIGHTING: match the source photo (direction, warmth, sharpness, grain). Real contact shadows.',
-    'Faces stay identity-locked. Tiny pose tweaks for a relaxed close selfie are allowed — never two stiff distant cutouts.',
-    ...photorealismBlock(starName),
+      ? [`CELEBRITY: match face/hair from [1]. Outfit fits this setting; keep their vibe, not the exact reference clothes.`]
+      : [`CELEBRITY: ${starDescription}. Dress for this scene.`]),
+    'SELFIE LOCK: place the celebrity in free space left or right, close natural proximity — slight lean-in or light shoulder touch OK. Never stiff, never distant, never behind, never a tiny background figure.',
+    ...(userHint ? [`NOTE: ${userHint}`] : []),
+    ...selfiePhotorealismLines(starName),
     ...photoEditHeightLines(ctx),
     '',
-    'FORBIDDEN: face-swap artifacts, sticker/cutout look, studio/glamour, rebuilding the scene, removing important objects, changing the user\'s face or hair, celebrity behind/far/background, physically impossible placement.',
-    `PRIORITY 1: preserve the source photo. PRIORITY 2: natural integration of ${starName}.`,
+    'FORBIDDEN: sticker/cutout, studio/glamour, rebuild scene, face-swap, celebrity in background.',
+    'PRIORITY: preserve the source photo, then natural celebrity integration.',
   ].filter((line) => line !== '').join('\n')
 }
 
@@ -1405,8 +1422,21 @@ async function resolveReferenceImageUrl(
 }
 
 function resolvePhotoEditModel(): 'nano-banana-2' | 'google/nano-banana-edit' {
-  const raw = (Deno.env.get('PHOTO_EDIT_KIE_MODEL') ?? 'google/nano-banana-edit').trim()
-  return raw === 'nano-banana-2' ? 'nano-banana-2' : 'google/nano-banana-edit'
+  const raw = (Deno.env.get('PHOTO_EDIT_KIE_MODEL') ?? 'nano-banana-2').trim()
+  return raw === 'google/nano-banana-edit' ? 'google/nano-banana-edit' : 'nano-banana-2'
+}
+
+function resolveKieResolution(creationMode: CelebrityCreationMode): '1K' | '2K' {
+  if (creationMode === 'photo_edit') {
+    const raw = (Deno.env.get('PHOTO_EDIT_KIE_RESOLUTION') ?? '1K').trim().toUpperCase()
+    return raw === '2K' ? '2K' : '1K'
+  }
+  const raw = (Deno.env.get('KIE_RESOLUTION') ?? '2K').trim().toUpperCase()
+  return raw === '1K' ? '1K' : '2K'
+}
+
+function logGenerateTiming(phase: string, startMs: number, extra?: Record<string, unknown>): void {
+  console.log('[generate] timing', JSON.stringify({ phase, ms: Date.now() - startMs, ...extra }))
 }
 
 async function createTask(
@@ -1415,8 +1445,10 @@ async function createTask(
   apiKey: string
 ): Promise<string> {
   const { prompt, truncated } = buildPhotoPrompt(ctx)
+  const creationMode = ctx.creationMode ?? 'full_generation'
   const useEditModel =
-    ctx.creationMode === 'photo_edit' && resolvePhotoEditModel() === 'google/nano-banana-edit'
+    creationMode === 'photo_edit' && resolvePhotoEditModel() === 'google/nano-banana-edit'
+  const resolution = resolveKieResolution(creationMode)
 
   const payload = useEditModel
     ? {
@@ -1434,7 +1466,7 @@ async function createTask(
           prompt,
           image_input: imageUrls,
           aspect_ratio: 'auto',
-          resolution: '2K',
+          resolution,
           output_format: 'jpg',
         },
       }
@@ -1442,8 +1474,9 @@ async function createTask(
   console.log('[generate] createTask', JSON.stringify({
     promptChars: prompt.length,
     promptTruncated: truncated,
-    creationMode: ctx.creationMode ?? 'full_generation',
+    creationMode,
     model: payload.model,
+    resolution: useEditModel ? undefined : resolution,
   }))
   console.log(`[${payload.model}] prompt:`, prompt)
 
@@ -1899,19 +1932,24 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // La taille de la star n'est jamais fournie par le client : elle est
-    // résolue ici à partir du nom / celebrityId StarFusion, puis mise en cache
-    // — AVANT l'analyse de composition en photo_edit.
-    // La photo célébrité n'est pas une source d'identité nominale : uniquement
-    // une référence visuelle pour Nano Banana.
+    // full_generation : lookup complet (Wikidata). photo_edit selfie : cache DB uniquement.
+    const startMs = Date.now()
     if (userHeightCm) {
+      const tHeight = Date.now()
       const starfusionCelebrityId = celebrityIdFromName(celebrityName)
       const heightLookupName = celebrityName
-      const celebrityHeight = await resolveCelebrityHeight(db, heightLookupName)
+      const celebrityHeight = creationMode === 'photo_edit'
+        ? await resolveCelebrityHeightCacheOnly(db, heightLookupName)
+        : await resolveCelebrityHeight(db, heightLookupName)
       generationContext.celebrityHeightCm = celebrityHeight.heightCm
       generationContext.celebrityHeightConfidence = celebrityHeight.confidence
       const targetRatio = computeTargetApparentHeightRatio(userHeightCm, celebrityHeight.heightCm)
       if (targetRatio != null) generationContext.celebrityTargetApparentHeightRatio = targetRatio
+      logGenerateTiming('height_lookup', tHeight, {
+        creationMode,
+        cacheOnly: creationMode === 'photo_edit',
+        celebrityHeightCm: celebrityHeight.heightCm,
+      })
       logHeightEvent('constraint_applied', {
         celebrityId: celebrityHeight.celebrityId || starfusionCelebrityId,
         lookupName: heightLookupName,
@@ -1923,39 +1961,6 @@ Deno.serve(async (req: Request) => {
         targetApparentHeightRatio: generationContext.celebrityTargetApparentHeightRatio ?? null,
         sourceUrl: celebrityHeight.sourceUrl,
       })
-    }
-
-    if (creationMode === 'photo_edit') {
-      const composition = await analyzePhotoEditComposition(imageBase64, generationContext, kieKey)
-      if (!composition.suitable) {
-        console.log('[generate] photo_edit scale', JSON.stringify({
-          userHeightCm: generationContext.userHeightCm ?? null,
-          celebrityHeightCm: generationContext.celebrityHeightCm ?? null,
-          targetApparentHeightRatio: generationContext.celebrityTargetApparentHeightRatio ?? null,
-          celebrityPlacementInstruction: null,
-          kieModel: resolvePhotoEditModel(),
-          suitable: false,
-        }))
-        return new Response(
-          JSON.stringify({
-            error: 'Cette photo ne permet pas d’ajouter la star de façon naturelle sans modifier la scène. Choisis une photo avec un peu plus d’espace autour de toi.',
-            code: 'SOURCE_PHOTO_UNSUITABLE',
-          }),
-          { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } }
-        )
-      }
-      generationContext.celebrityPlacementInstruction = composition.celebrityPlacementInstruction
-      if (composition.targetApparentHeightRatio != null) {
-        generationContext.celebrityTargetApparentHeightRatio = composition.targetApparentHeightRatio
-      }
-      console.log('[generate] photo_edit scale', JSON.stringify({
-        userHeightCm: generationContext.userHeightCm ?? null,
-        celebrityHeightCm: generationContext.celebrityHeightCm ?? null,
-        targetApparentHeightRatio: generationContext.celebrityTargetApparentHeightRatio ?? null,
-        celebrityPlacementInstruction: generationContext.celebrityPlacementInstruction,
-        kieModel: resolvePhotoEditModel(),
-        suitable: true,
-      }))
     }
 
     const sceneSummary = buildSceneSummary(generationContext)
@@ -2004,12 +2009,17 @@ Deno.serve(async (req: Request) => {
     let pollJobId: string | undefined
     const tempPaths: string[] = []
     try {
+      const tUpload = Date.now()
       const imageUrl = await resolveReferenceImageUrl(imageBase64, kieKey, tempPaths)
       const imageUrls = [imageUrl]
       if (celebrityImageBase64) {
         imageUrls.push(await resolveReferenceImageUrl(celebrityImageBase64, kieKey, tempPaths))
       }
+      logGenerateTiming('image_upload', tUpload, { imageCount: imageUrls.length, creationMode })
+
+      const tCreate = Date.now()
       const kieTaskId = await createTask(imageUrls, generationContext, kieKey)
+      logGenerateTiming('kie_create_task', tCreate, { creationMode })
 
       const { data: jobRow, error: jobInsertErr } = await db
         .from('generation_jobs')
@@ -2031,6 +2041,7 @@ Deno.serve(async (req: Request) => {
         throw new Error(jobInsertErr?.message ?? 'Impossible d’enregistrer la génération en cours')
       }
       pollJobId = jobRow.id as string
+      logGenerateTiming('start_total', startMs, { creationMode, pollJobId })
     } catch (genErr) {
       if (creditReserved && billingSessionId) {
         const refunded = await refundGenerationCredit(db, billingSessionId)
