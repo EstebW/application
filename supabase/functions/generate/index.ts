@@ -986,25 +986,24 @@ function computeTargetApparentHeightRatio(
   return Math.round((celebrityHeightCm / userHeightCm) * 100) / 100
 }
 
-function photoEditHeightLines(ctx: PhotoGenerationContext): string[] {
+function photoEditHeightLinesFr(ctx: PhotoGenerationContext, starName: string): string[] {
   const userH = ctx.userHeightCm
   const starH = ctx.celebrityHeightCm ?? null
   const ratio = ctx.celebrityTargetApparentHeightRatio ?? computeTargetApparentHeightRatio(userH, starH)
   if (userH && starH && ratio != null) {
     const pct = Math.round(ratio * 100)
-    const delta = Math.abs(userH - starH)
-    const relative = starH < userH ? 'slightly shorter, never tiny' : starH > userH ? 'slightly taller, never giant' : 'essentially the same height'
     return [
-      `SCALE: user ${userH} cm, celebrity ${starH} cm (Δ ${delta} cm). At comparable depth, celebrity visible height ≈ ${pct}% of the user — ${relative}.`,
-      'Keep the celebrity near the user, same ground plane. Never a distant miniature. Adapt the celebrity to the photo, not the user to the celebrity.',
+      `- Taille réaliste : utilisateur ${userH} cm, ${starName} ${starH} cm — à la même profondeur caméra, la star paraît environ ${pct} % de la hauteur visible de l'utilisateur.`,
     ]
   }
   if (userH) {
     return [
-      `SCALE: user ${userH} cm. Realistic adult scale. Keep the celebrity near the user — never miniature in the background.`,
+      `- Taille réaliste : utilisateur ${userH} cm — la star à taille adulte crédible à côté, jamais miniature en arrière-plan.`,
     ]
   }
-  return ['SCALE: realistic adult size. Keep the celebrity near the user — never a tiny background figure.']
+  return [
+    '- Taille et perspective crédibles : la star à côté de l\'utilisateur, même plan caméra, jamais en retrait.',
+  ]
 }
 
 function extractTextFromResponse(data: unknown): string {
@@ -1203,16 +1202,7 @@ async function analyzePhotoEditComposition(
   }
 }
 
-/** Selfie photo_edit : prompt court (~1K car.) — KIE plus rapide, pas de Gemini placement. */
-function selfiePhotorealismLines(celebrityName: string): string[] {
-  const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
-  return [
-    'LOOK: amateur phone snap — match source grain, lighting, compression. No beauty filter, no AI-smooth skin. Natural pores and texture on BOTH; ordinary imperfections OK, no new distinctive marks.',
-    `${celeb} must inherit the source photo quality — never smoother, sharper, or more retouched than the user.`,
-  ]
-}
-
-/** Selfie « Ajouter la star à ma photo » — court, dense, sans analyse Gemini. */
+/** Selfie « Ajouter la star à ma photo » — aligné sur les prompts KIE directs qui fonctionnent. */
 function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   const {
     celebrityName,
@@ -1221,35 +1211,41 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     customPrompt,
     hasCelebrityReferenceImage,
   } = ctx
-  const starName = sanitizeSceneText(celebrityName) || 'the celebrity'
+  const starName = sanitizeSceneText(celebrityName) || 'la célébrité'
   const domain = sanitizeSceneText(celebrityDomain)
   const style = celebrityStyleDescription ? sanitizeSceneText(celebrityStyleDescription) : ''
   const dual = Boolean(hasCelebrityReferenceImage)
-  const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 80) : ''
+  const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 120) : ''
   const starDescription = sanitizeSceneText(
     dual ? (domain ? `${starName} (${domain})` : starName) : [domain && `${starName} (${domain})`, style].filter(Boolean).join('. ')
   ).slice(0, 120) || starName
 
   return [
-    'MODE: SELFIE EDIT — add the celebrity to the user selfie.',
+    'Utilise image_input[0] comme image de base.',
     '',
-    'IMAGE ORDER:',
-    '- image_input[0] = user selfie + scene. Keep as the foundation.',
-    ...(dual ? [`- image_input[1] = face/hair for ${starName}. Outfit: adapt to this scene, not a copy of the reference photo.`] : []),
-    '',
-    `GOAL: ${starName} beside the user in a shared selfie — same camera plane, both look at the phone, heads close. Candid phone snap, not a collage.`,
-    '',
-    'USER: same person as [0] — face, hair, body locked. Tiny pose tweaks OK. No beautify or replace.',
+    `Crée une photo ultra réaliste de cette scène, comme si la personne sur la photo avait croisé ${starName} et pris un selfie spontané avec elle/lui.`,
     ...(dual
-      ? [`CELEBRITY: match face/hair from [1]. Outfit fits this setting; keep their vibe, not the exact reference clothes.`]
-      : [`CELEBRITY: ${starDescription}. Dress for this scene.`]),
-    'SELFIE LOCK: place the celebrity in free space left or right, close natural proximity — slight lean-in or light shoulder touch OK. Never stiff, never distant, never behind, never a tiny background figure.',
-    ...(userHint ? [`NOTE: ${userHint}`] : []),
-    ...selfiePhotorealismLines(starName),
-    ...photoEditHeightLines(ctx),
+      ? [`image_input[1] sert à reconnaître le visage et les cheveux de ${starName} — pas à copier la tenue ni le décor de la référence.`]
+      : []),
     '',
-    'FORBIDDEN: sticker/cutout, studio/glamour, rebuild scene, face-swap, celebrity in background.',
-    'PRIORITY: preserve the source photo, then natural celebrity integration.',
+    'Règles absolues :',
+    '- Préserve exactement la personne déjà sur la photo : même identité, visage, traits, yeux, carnation, cheveux, âge apparent, tenue, posture générale, cadrage selfie.',
+    '- Ne modifie pas le décor principal, la lumière, l\'angle, la perspective ni l\'ambiance.',
+    `- Ajoute uniquement ${starName} dans l'espace libre à côté, comme si la photo avait été prise à deux dès l'origine.`,
+    '- Star immédiatement reconnaissable, intégration naturelle sans collage visible.',
+    ...photoEditHeightLinesFr(ctx, starName),
+    '- Tenue casual réaliste adaptée au lieu (pas tapis rouge, pas look trop stylisé).',
+    '- Résultat = vrai selfie iPhone sur le vif, pas photo studio.',
+    '',
+    'Style : lumière naturelle, peau avec texture réelle et petits défauts, cheveux vivants, proportions justes, posture détendue, rencontre spontanée.',
+    '',
+    'Composition : la personne reste à sa place. La star occupe l\'espace vide à côté, légèrement penchée, proche, attitude amicale. Cohérence lumière, ombres, perspective, netteté, colorimétrie, distance caméra.',
+    '',
+    'À éviter : peau plastique, effet beauté, visage déformé, arrière-plan modifié, pose trop parfaite, rendu pro, collage visible.',
+    ...(userHint ? ['', `Note : ${userHint}`] : []),
+    ...(dual ? [] : ['', `Célébrité : ${starDescription}.`]),
+    '',
+    `Objectif : une vraie photo selfie au moment de la rencontre avec ${starName}, 100 % naturel et crédible.`,
   ].filter((line) => line !== '').join('\n')
 }
 

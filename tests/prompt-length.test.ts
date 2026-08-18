@@ -49,20 +49,21 @@ const worstFullGen: PhotoGenerationContext = {
 }
 
 describe('longueur des prompts KIE', () => {
-  it('selfie photo_edit reste court et dense', () => {
+  it('selfie photo_edit suit le format KIE direct (français, 2 images)', () => {
     const raw = buildPhotoEditPrompt(worstPhotoEdit)
     const prompt = buildPhotoPrompt(worstPhotoEdit)
-    assert.ok(raw.length <= 1800, `photo_edit selfie trop long: ${raw.length} > 1800`)
+    assert.ok(raw.length <= 2800, `photo_edit selfie trop long: ${raw.length} > 2800`)
     assert.ok(raw.length <= KIE_PROMPT_MAX_CHARS)
     assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS)
-    assert.match(prompt, /SELFIE EDIT/)
-    assert.match(prompt, /SELFIE LOCK/)
-    assert.match(prompt, /AI-smooth skin/)
-    assert.match(prompt, /same camera plane/)
+    assert.match(prompt, /Utilise image_input\[0\]/)
+    assert.match(prompt, /Règles absolues/)
+    assert.match(prompt, /selfie spontané/)
+    assert.match(prompt, /image_input\[1\]/)
+    assert.match(prompt, /peau plastique/)
+    assert.match(prompt, /espace libre à côté/)
     assert.match(prompt, /182/)
-    assert.doesNotMatch(prompt, /PLACEMENT/)
-    assert.doesNotMatch(prompt, /NATURAL MOMENT LOCK/)
     assert.doesNotMatch(prompt, /FACIAL IDENTITY LOCK/)
+    assert.doesNotMatch(prompt, /NATURAL MOMENT LOCK/)
   })
 
   it('full_generation garde le prompt qualité complet', () => {
