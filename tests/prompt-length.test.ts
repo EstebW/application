@@ -52,7 +52,11 @@ describe('longueur des prompts KIE', () => {
   it('selfie photo_edit suit le format KIE direct (français, 2 images)', () => {
     const raw = buildPhotoEditPrompt(worstPhotoEdit)
     const prompt = buildPhotoPrompt(worstPhotoEdit)
-    assert.ok(raw.length <= 2800, `photo_edit selfie trop long: ${raw.length} > 2800`)
+    assert.match(prompt, /VERROUILLAGE PHOTO SOURCE/)
+    assert.match(prompt, /conservés à 100 %/)
+    assert.match(prompt, /Tête et visage/)
+    assert.match(prompt, /Fond et décor/)
+    assert.ok(raw.length <= 3000, `photo_edit selfie trop long: ${raw.length} > 3000`)
     assert.ok(raw.length <= KIE_PROMPT_MAX_CHARS)
     assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS)
     assert.match(prompt, /Utilise image_input\[0\]/)

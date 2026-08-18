@@ -187,7 +187,7 @@ interface PromptSection {
 }
 
 const PROTECTED_SECTION_HEADER =
-  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK)/i
+  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|VERROUILLAGE PHOTO SOURCE)/i
 const SECONDARY_SECTION_HEADER =
   /^(SCENE REQUIREMENTS|FINAL MANDATORY CHECK|SUBJECTS:)/i
 const OTHER_SECTION_HEADER =
@@ -1221,16 +1221,19 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   ).slice(0, 120) || starName
 
   return [
-    'Utilise image_input[0] comme image de base.',
+    'Utilise image_input[0] comme image de base — c\'est la vérité absolue de la photo.',
     '',
     `Crée une photo ultra réaliste de cette scène, comme si la personne sur la photo avait croisé ${starName} et pris un selfie spontané avec elle/lui.`,
     ...(dual
-      ? [`image_input[1] sert à reconnaître le visage et les cheveux de ${starName} — pas à copier la tenue ni le décor de la référence.`]
+      ? [`image_input[1] sert uniquement à reconnaître le visage et les cheveux de ${starName} — pas à copier la tenue ni le décor de la référence.`]
       : []),
     '',
+    'VERROUILLAGE PHOTO SOURCE (priorité absolue — 0 erreur tolérée) :',
+    '- Fond et décor de image_input[0] conservés à 100 % : mêmes bâtiments, rue, ciel, objets, ombres, lumière, angle, perspective, netteté, colorimétrie. Ne recadre pas, ne reconstruis pas, ne remplace pas l\'arrière-plan.',
+    '- Tête et visage de la personne sur image_input[0] conservés à 100 % : même identité, forme du visage, yeux, nez, bouche, cheveux, carnation, expression, angle de tête. Interdit de la remplacer, la retoucher, l\'embellir, la rajeunir ou la fusionner avec la star.',
+    '- Seule modification autorisée : ajouter la star dans l\'espace libre à côté. Tout le reste de image_input[0] reste figé pixel par pixel.',
+    '',
     'Règles absolues :',
-    '- Préserve exactement la personne déjà sur la photo : même identité, visage, traits, yeux, carnation, cheveux, âge apparent, tenue, posture générale, cadrage selfie.',
-    '- Ne modifie pas le décor principal, la lumière, l\'angle, la perspective ni l\'ambiance.',
     `- Ajoute uniquement ${starName} dans l'espace libre à côté, comme si la photo avait été prise à deux dès l'origine.`,
     '- Star immédiatement reconnaissable, intégration naturelle sans collage visible.',
     ...photoEditHeightLinesFr(ctx, starName),
@@ -1239,13 +1242,13 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     '',
     'Style : lumière naturelle, peau avec texture réelle et petits défauts, cheveux vivants, proportions justes, posture détendue, rencontre spontanée.',
     '',
-    'Composition : la personne reste à sa place. La star occupe l\'espace vide à côté, légèrement penchée, proche, attitude amicale. Cohérence lumière, ombres, perspective, netteté, colorimétrie, distance caméra.',
+    'Composition : la personne reste exactement à sa place, inchangée. La star occupe uniquement l\'espace vide à côté, légèrement penchée, proche, attitude amicale.',
     '',
-    'À éviter : peau plastique, effet beauté, visage déformé, arrière-plan modifié, pose trop parfaite, rendu pro, collage visible.',
+    'À éviter absolument : fond modifié, tête ou visage de l\'utilisateur remplacé/retouché, peau plastique, effet beauté, visage déformé, arrière-plan reconstruit, pose trop parfaite, rendu pro, collage visible.',
     ...(userHint ? ['', `Note : ${userHint}`] : []),
     ...(dual ? [] : ['', `Célébrité : ${starDescription}.`]),
     '',
-    `Objectif : une vraie photo selfie au moment de la rencontre avec ${starName}, 100 % naturel et crédible.`,
+    `Objectif : une vraie photo selfie — la personne et le fond de image_input[0] intacts à 100 %, ${starName} ajoutée naturellement à côté.`,
   ].filter((line) => line !== '').join('\n')
 }
 
