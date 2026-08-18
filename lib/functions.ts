@@ -49,11 +49,12 @@ export async function callFunction<T = unknown>(
     let message = text
     let code: string | undefined
     try {
-      const parsed = JSON.parse(text) as { error?: string; code?: string }
+      const parsed = JSON.parse(text) as { error?: string; code?: string; message?: string }
       if (parsed.error) message = parsed.error
+      else if (parsed.message) message = parsed.message
       code = parsed.code
     } catch {
-      // pas du JSON
+      // texte brut
     }
     throw new FunctionCallError(message, res.status, code)
   }

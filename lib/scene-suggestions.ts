@@ -158,7 +158,7 @@ interface PromptSection {
 }
 
 const PROTECTED_SECTION_HEADER =
-  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM)/i
+  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK)/i
 const SECONDARY_SECTION_HEADER =
   /^(SCENE REQUIREMENTS|FINAL MANDATORY CHECK|SUBJECTS:)/i
 const OTHER_SECTION_HEADER =
@@ -308,12 +308,19 @@ function photorealismBlock(celebrityName: string): string[] {
   const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
   return [
     'PHOTOREALISM — amateur smartphone snap (after face locks):',
-    `Ordinary phone-gallery photo with ${celeb}: candid, slightly imperfect, not AI/CGI/studio/glamour/influencer/pro shoot.`,
-    'Natural skin with pores, texture, and small flaws. No smoothed skin, beauty filter, or boosted makeup.',
-    'Slightly imperfect framing, focus, and exposure. Mild phone noise, JPEG compression, realistic lens flaws.',
-    'Natural expressions and posture. Realistic hands, hair, and clothes.',
-    'BOTH people share the same sharpness, grain, exposure, lighting, and color. The celebrity must never look sharper, cleaner, or better shot than the user.',
-    "Follow the USER SCENE BRIEF literally. Vary camera/pose/flaws only — never Person A's identity.",
+    `Ordinary phone-gallery photo with ${celeb}: candid, slightly soft, not studio, glamour, influencer, editorial, CGI, or a polished composite.`,
+    'No beauty filter, no AI-smooth skin, no porcelain/waxy/plastic finish, no airbrush. Skin must look like unretouched real skin — that ordinary texture is what makes the photo beautiful and believable.',
+    'Natural non-distinctive imperfections only: visible pores, slight uneven tone, subtle under-eye texture, fine lines, facial asymmetry. Do not invent new moles, scars, or distinctive marks. Realistic hair. Slight grain, compression, imperfect candid framing.',
+    `BOTH people share the source photo's grain, softness, sharpness, noise, exposure, white balance and non-retouched skin. ${celeb} must never look smoother, cleaner, sharper, or more retouched than the user.`,
+    'Natural spontaneous expressions and body language. Follow the USER SCENE BRIEF literally.',
+  ]
+}
+
+function naturalMomentBlock(): string[] {
+  return [
+    'NATURAL MOMENT LOCK: the result must look like a genuine candid shared moment between two real people already together, not two subjects placed side by side.',
+    'Relaxed posture, subtle torso rotation, slight lean/head tilt, natural asymmetry, believable proximity. A slight lean-in or arm around shoulder/waist/back is allowed if it improves realism. Small pose tweaks OK for a believable instant.',
+    'Avoid stiff, static, symmetrical, overly frontal/centered, or cutout-next-to-user poses. Expressions unforced. Realism = photographic texture AND living human interaction.',
   ]
 }
 
@@ -379,6 +386,7 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   const closingBlocks = [
     heightSection,
     ...photorealismBlock(starName),
+    ...naturalMomentBlock(),
     ...sceneAdaptiveWardrobeBlock(starName),
   ].filter(Boolean)
 
@@ -469,7 +477,6 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     celebrityName,
     celebrityDomain,
     celebrityStyleDescription,
-    interaction,
     customPrompt,
     hasCelebrityReferenceImage,
     celebrityPlacementInstruction,
@@ -478,11 +485,11 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   const domain = sanitizeSceneText(celebrityDomain)
   const style = celebrityStyleDescription ? sanitizeSceneText(celebrityStyleDescription) : ''
   const dual = Boolean(hasCelebrityReferenceImage)
-  const interactionPrompt = getInteractionPrompt(interaction)
+  const interactionPrompt = getInteractionPrompt('selfie')
   const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 180) : ''
   const sceneIntent = sanitizeSceneText(
     [interactionPrompt, userHint].filter(Boolean).join(' — ')
-  ).slice(0, 220) || 'présence naturelle, comme si la star était déjà là'
+  ).slice(0, 220) || 'both looking at the phone camera as if taking a selfie together, heads close'
   const starDescription = sanitizeSceneText(
     dual
       ? (domain ? `${starName} (${domain})` : starName)
@@ -498,34 +505,34 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     'IMAGE ORDER:',
     '- image_input[0] = SOURCE photo (user + scene). Keep this photo as the visual foundation.',
     ...(dual
-      ? [`- image_input[1] = FACE/HAIR identity only for ${starName}. Ignore its background, pose, clothes, crop, and quality.`]
+      ? [`- Second image = FACE/HAIR identity for ${starName}, plus their general personal aesthetic. Do not copy the exact outfit, crop, background, or photo quality.`]
       : []),
     '',
-    `GOAL: insert ${starName} into the source photo as if they were really there. Candid amateur smartphone snapshot, not a collage or studio shoot.`,
+    `GOAL: insert ${starName} into a selfie with the user — both looking at the phone camera, celebrity beside them (not behind). Candid amateur smartphone snapshot, not a collage or studio shoot.`,
     '',
     'USER: keep the same person — same face, hair, identity, body. Tiny pose tweaks OK for a natural interaction. Do not beautify, rejuvenate, or replace them.',
     'SCENE: keep the same place, lighting, framing, objects, amateur feel. Do not rebuild the location or invent furniture.',
     ...(dual
       ? [
-          `CELEBRITY: match face and hair to image_input[1] (not a generic lookalike, not blended with the user). Dress them for THIS scene. Pose/lighting may change; identity must not.`,
+          `CELEBRITY: match face and hair to image_input[1] (not a generic lookalike, not blended with the user). Adapt the outfit to THIS setting while keeping a style consistent with their reference appearance and recognizable personal aesthetic. Do not copy the exact reference outfit, but do not invent a completely unrelated fashion style. Pose/lighting may change; identity must not.`,
         ]
       : [`CELEBRITY: ${starDescription}. Dress them for THIS scene.`]),
     ...(placement
       ? [
-          'PLACEMENT (follow this, not a generic empty-space insert):',
+          'PLACEMENT (use this for LEFT vs RIGHT / where space exists):',
           placement,
-          `If this conflicts with "${sceneIntent}", keep the placement above.`,
+          'Keep that side/space. If it puts the celebrity behind, farther back, or as a background figure, move them beside the user on the same camera plane instead.',
         ]
       : [
-          `Place ${starName} with a posture matching: ${sceneIntent}. Ignore that intent if it would rebuild the scene.`,
+          `Place ${starName} beside the user in the free space, same camera plane, selfie posture: ${sceneIntent}. Ignore that intent if it would rebuild the scene or push them behind.`,
         ]),
-    'INTERACTION: believable proximity, relaxed posture, candid body language. Not two stiff cutouts.',
+    'SELFIE LOCK: this is a selfie taken by the user. Place the celebrity next to them on the same camera plane, in the free space (left or right), in close natural proximity — heads close, slight lean-in, relaxed, maybe a light shoulder/arm touch if it fits. Never stiff, never distant, never behind, never a tiny background figure. Both look toward the phone, like a real shared selfie.',
     'LIGHTING: match the source photo (direction, warmth, sharpness, grain). Real contact shadows.',
-    'The inserted celebrity must inherit the photographic imperfections of the SOURCE photo: same sharpness, noise, compression, exposure, color response and phone-camera quality. Do not improve the source photo to match the celebrity. Adapt/degrade the celebrity to the source when necessary.',
+    'Faces stay identity-locked. Tiny pose tweaks for a relaxed close selfie are allowed — never two stiff distant cutouts.',
     ...photorealismBlock(starName),
     ...photoEditHeightLines(ctx),
     '',
-    'FORBIDDEN: face-swap artifacts, sticker/cutout look, studio/glamour, rebuilding the scene, removing important objects, changing the user\'s face or hair, physically impossible placement.',
+    'FORBIDDEN: face-swap artifacts, sticker/cutout look, studio/glamour, rebuilding the scene, removing important objects, changing the user\'s face or hair, celebrity behind/far/background, physically impossible placement.',
     `PRIORITY 1: preserve the source photo. PRIORITY 2: natural integration of ${starName}.`,
   ].filter((line) => line !== '').join('\n')
 }

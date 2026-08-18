@@ -9,6 +9,7 @@ import type { CelebrityCreationMode, CelebrityResult, GenerationRequest } from '
 import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { callFunction, FunctionCallError } from '@/lib/functions'
 import { formatKieError, isSensitiveContentError } from '@/lib/kie-errors'
+import { runGenerationWithPolling } from '@/lib/generation-poll'
 import { getCelebrityFirstName } from '@/lib/celebrity-image'
 import { celebrityIdFromName } from '@/lib/height'
 import {
@@ -71,9 +72,7 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
       setStepIndex(generationStepFromElapsed(elapsed))
     }, 250)
 
-    callFunction<{ imageBase64?: string; generationId?: string; creditsBalance?: number; error?: string }>(
-      'generate',
-      {
+    runGenerationWithPolling({
         imageBase64,
         celebrityName: name,
         celebrityDomain: celebrity_domain,
@@ -84,8 +83,6 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
         generationMode: generationRequest.mode,
         creationMode: resolvedCreationMode,
         sceneSource: isPhotoEdit ? undefined : generationRequest.sceneSource,
-        // photo_edit : la scène est la photo elle-même, le backend refuse photoScene.
-        // user_photo : le décor vient de image_input[0], pas d'une scène inventée.
         photoScene:
           isPhotoEdit || generationRequest.sceneSource === 'user_photo'
             ? undefined
@@ -95,26 +92,23 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
             ? undefined
             : generationRequest.customPrompt,
         interaction: generationRequest.interaction,
-        // Le backend ne fait pas confiance à celebrityId : il le recalcule à
-        // partir du nom pour retrouver la fiche taille de la star.
         celebrityId: celebrityIdFromName(name),
         userHeightCm,
         sessionId,
         userId,
         email,
         analysisId,
-      }
-    )
+      })
       .then((data) => {
         clearInterval(progressInterval)
 
-        if (data.error || !data.imageBase64) {
-          throw new Error(data.error ?? 'Pas d\'image générée')
+        if (!data.imageBase64) {
+          throw new Error('Pas d\'image générée')
         }
 
         setStepIndex(generationStepFromElapsed(Date.now() - t0, true))
         setProgress(100)
-        setTimeout(() => onComplete(data.imageBase64!, data.generationId, data.creditsBalance), 700)
+        setTimeout(() => onComplete(data.imageBase64, data.generationId, data.creditsBalance), 700)
       })
       .catch((err: unknown) => {
         clearInterval(progressInterval)

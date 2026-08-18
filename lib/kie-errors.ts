@@ -25,6 +25,22 @@ export function formatKieError(message: string, code?: string): string {
     return 'Le service de génération IA est temporairement indisponible (crédits fournisseur épuisés). Réessaie un peu plus tard.'
   }
 
+  if (code === 'GENERATION_JOB_EXPIRED') {
+    return 'La génération a expiré. Réessaie — ton crédit a été remboursé si besoin.'
+  }
+
+  if (code === 'GENERATION_JOB_NOT_FOUND') {
+    return 'Génération introuvable. Relance une nouvelle photo.'
+  }
+
+  if (
+    code === 'WORKER_RESOURCE_LIMIT' ||
+    lower.includes('worker_resource_limit') ||
+    lower.includes('not having enough compute resources')
+  ) {
+    return 'Le serveur a été surchargé pendant la génération. Réessaie dans quelques secondes.'
+  }
+
   if (lower.includes('timeout')) {
     return 'La génération a pris trop de temps. Réessaie — la photo est parfois prête juste après.'
   }

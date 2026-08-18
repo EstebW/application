@@ -58,6 +58,13 @@ describe('longueur des prompts KIE', () => {
     assert.match(prompt, /SOURCE photo/)
     assert.match(prompt, /PLACEMENT/)
     assert.match(prompt, /PHOTOREALISM/)
+    assert.match(prompt, /SELFIE LOCK/)
+    assert.match(prompt, /same camera plane/)
+    assert.match(prompt, /close natural proximity/)
+    assert.match(prompt, /non-distinctive imperfections/)
+    assert.match(prompt, /AI-smooth skin/)
+    assert.doesNotMatch(prompt, /NATURAL MOMENT LOCK/)
+    assert.match(prompt, /unrelated fashion style/)
     assert.match(prompt, /182/)
   })
 
@@ -107,6 +114,7 @@ describe('clampKiePrompt', () => {
       'PERSON_A_LOCK_TOKEN',
       'PHOTOREALISM — amateur smartphone snap (after face locks):',
       'PHOTOREALISM_TOKEN_UNIQUE',
+      'NATURAL MOMENT LOCK: TOKEN_MOMENT_UNIQUE',
       'WARDROBE: filler:',
       'z'.repeat(5000),
       'USER SCENE BRIEF (setting/outfits/pose ONLY — faces stay locked; follow literally):',
@@ -122,6 +130,7 @@ describe('clampKiePrompt', () => {
     assert.match(prompt, /PERSON A HARD LOCK/)
     assert.match(prompt, /PERSON_A_LOCK_TOKEN/)
     assert.match(prompt, /PHOTOREALISM_TOKEN_UNIQUE/)
+    assert.match(prompt, /TOKEN_MOMENT_UNIQUE/)
     assert.match(prompt, /USER SCENE BRIEF/)
     assert.match(prompt, /TOKEN_BRIEF_UNIQUE/)
     assert.notEqual(prompt, oversized.slice(0, KIE_PROMPT_MAX_CHARS))

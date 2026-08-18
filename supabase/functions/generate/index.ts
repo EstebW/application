@@ -58,8 +58,9 @@ async function getAuthUser(req: Request): Promise<User | null> {
 const KIE_API_BASE = 'https://api.kie.ai'
 const KIE_FILE_API_BASE = 'https://kieai.redpandaai.co'
 const POLL_INTERVAL_MS = 3000
-/** Nano Banana dépasse souvent 90s ; un abort trop tôt affiche une erreur alors que la photo est prête. */
-const POLL_TIMEOUT_MS = 300_000
+/** Durée max côté client (plusieurs appels poll courts). */
+const CLIENT_POLL_TIMEOUT_MS = 300_000
+const JOB_MAX_AGE_MS = 30 * 60 * 1000
 const GENERATION_CREDIT_COST = 1
 const COMPOSITION_MODEL = 'gemini-3-flash'
 const COMPOSITION_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
@@ -186,7 +187,7 @@ interface PromptSection {
 }
 
 const PROTECTED_SECTION_HEADER =
-  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM)/i
+  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK)/i
 const SECONDARY_SECTION_HEADER =
   /^(SCENE REQUIREMENTS|FINAL MANDATORY CHECK|SUBJECTS:)/i
 const OTHER_SECTION_HEADER =
@@ -818,12 +819,19 @@ function photorealismBlock(celebrityName: string): string[] {
   const celeb = sanitizeSceneText(celebrityName) || 'the celebrity'
   return [
     'PHOTOREALISM — amateur smartphone snap (after face locks):',
-    `Ordinary phone-gallery photo with ${celeb}: candid, slightly imperfect, not AI/CGI/studio/glamour/influencer/pro shoot.`,
-    'Natural skin with pores, texture, and small flaws. No smoothed skin, beauty filter, or boosted makeup.',
-    'Slightly imperfect framing, focus, and exposure. Mild phone noise, JPEG compression, realistic lens flaws.',
-    'Natural expressions and posture. Realistic hands, hair, and clothes.',
-    'BOTH people share the same sharpness, grain, exposure, lighting, and color. The celebrity must never look sharper, cleaner, or better shot than the user.',
-    "Follow the USER SCENE BRIEF literally. Vary camera/pose/flaws only — never Person A's identity.",
+    `Ordinary phone-gallery photo with ${celeb}: candid, slightly soft, not studio, glamour, influencer, editorial, CGI, or a polished composite.`,
+    'No beauty filter, no AI-smooth skin, no porcelain/waxy/plastic finish, no airbrush. Skin must look like unretouched real skin — that ordinary texture is what makes the photo beautiful and believable.',
+    'Natural non-distinctive imperfections only: visible pores, slight uneven tone, subtle under-eye texture, fine lines, facial asymmetry. Do not invent new moles, scars, or distinctive marks. Realistic hair. Slight grain, compression, imperfect candid framing.',
+    `BOTH people share the source photo's grain, softness, sharpness, noise, exposure, white balance and non-retouched skin. ${celeb} must never look smoother, cleaner, sharper, or more retouched than the user.`,
+    'Natural spontaneous expressions and body language. Follow the USER SCENE BRIEF literally.',
+  ]
+}
+
+function naturalMomentBlock(): string[] {
+  return [
+    'NATURAL MOMENT LOCK: the result must look like a genuine candid shared moment between two real people already together, not two subjects placed side by side.',
+    'Relaxed posture, subtle torso rotation, slight lean/head tilt, natural asymmetry, believable proximity. A slight lean-in or arm around shoulder/waist/back is allowed if it improves realism. Small pose tweaks OK for a believable instant.',
+    'Avoid stiff, static, symmetrical, overly frontal/centered, or cutout-next-to-user poses. Expressions unforced. Realism = photographic texture AND living human interaction.',
   ]
 }
 
@@ -886,6 +894,7 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   const closingBlocks = [
     heightSection,
     ...photorealismBlock(starName),
+    ...naturalMomentBlock(),
     ...sceneAdaptiveWardrobeBlock(starName),
   ].filter(Boolean)
 
@@ -1123,13 +1132,14 @@ async function analyzePhotoEditComposition(
             '',
             'Détermine : position de l’utilisateur ; orientation et posture ; cadrage ; perspective ; profondeur ; distance caméra ; plan du sol / supports visibles ; objets importants ; zones réellement disponibles pour une deuxième personne à une profondeur comparable ; placement et posture plausibles de la célébrité.',
             'IDENTITÉ FACIALE : le placement doit laisser le visage de la célébrité assez grand pour conserver ses traits. Placer la célébrité à une profondeur proche de l’utilisateur. Ne jamais résoudre la composition en la transformant en petite silhouette d’arrière-plan.',
+            'SELFIE : la photo source est un selfie. Placer la célébrité à côté de l’utilisateur (gauche ou droite selon l’espace libre), même plan caméra, tous deux regardant vers le téléphone. Jamais en retrait, jamais plus loin, jamais en arrière-plan.',
             'CONTRÔLE QUALITÉ : ne pas exiger que la posture soit identique à la photo source. Ne pas exiger que chaque petit objet soit à la même position exacte. Micro-ajustements naturels valides : légère rotation du buste, variation de posture, bras/mains, tête légèrement réorientée, rapprochement, interaction vivante, petit objet secondaire déplacé. Invalider seulement si la scène est trop transformée (décor recréé, meuble important fortement déplacé, objet important disparu, cadrage/angle totalement changé) ou si l’identité dérive.',
             'OBJETS : conserver les objets importants. Un banc ou meuble structurant doit rester. Un petit objet secondaire (lunettes tenues autrement, tissu, rideau, accessoire) peut bouger légèrement.',
             `Intention utilisateur (à ignorer si elle exige de reconstruire le décor, de supprimer un objet important, ou de reculer fortement la célébrité) : ${sceneIntent}`,
             'Ne jamais proposer de recréer entièrement le décor ni de supprimer un objet important. De légers micro-ajustements de posture de l’utilisateur sont autorisés pour une interaction naturelle. Ne jamais inventer de banc, chaise, mur, table ou support absent. Le placement doit rester crédible dans l’espace déjà visible, à une profondeur caméra comparable.',
             lockedRatio != null
-              ? `Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, interaction naturelle vivante, visage assez grand pour conserver ses traits, hauteur apparente ≈ ${Math.round(lockedRatio * 100)} % de l’utilisateur","targetApparentHeightRatio":${lockedRatio}}`
-              : 'Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, même plancher, profondeur caméra comparable, interaction naturelle vivante, visage assez grand pour conserver ses traits"}',
+              ? `Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, selfie à côté, même plancher, même plan caméra, regards vers le téléphone, visage assez grand pour conserver ses traits, hauteur apparente ≈ ${Math.round(lockedRatio * 100)} % de l’utilisateur","targetApparentHeightRatio":${lockedRatio}}`
+              : 'Si une intégration crédible est possible : {"suitable":true,"celebrityPlacementInstruction":"une phrase concrète en français, ex: ajouter la célébrité à droite de l’utilisateur, selfie à côté, même plancher, même plan caméra, regards vers le téléphone, visage assez grand pour conserver ses traits"}',
             'Si aucun emplacement ne permet simultanément de conserver l’identité des visages, la structure globale de la photo source, une profondeur proche, le ratio de taille réaliste ET un visage de célébrité suffisamment visible, ou si cela exigerait de reconstruire fortement le décor / pousser la célébrité loin dans l’arrière-plan : {"suitable":false,"reason":"SOURCE_PHOTO_UNSUITABLE"}',
           ].join('\n'),
         },
@@ -1166,7 +1176,6 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     celebrityName,
     celebrityDomain,
     celebrityStyleDescription,
-    interaction,
     customPrompt,
     hasCelebrityReferenceImage,
     celebrityPlacementInstruction,
@@ -1175,11 +1184,11 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   const domain = sanitizeSceneText(celebrityDomain)
   const style = celebrityStyleDescription ? sanitizeSceneText(celebrityStyleDescription) : ''
   const dual = Boolean(hasCelebrityReferenceImage)
-  const interactionPrompt = getInteractionPrompt(interaction)
+  const interactionPrompt = getInteractionPrompt('selfie')
   const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 180) : ''
   const sceneIntent = sanitizeSceneText(
     [interactionPrompt, userHint].filter(Boolean).join(' — ')
-  ).slice(0, 220) || 'présence naturelle, comme si la star était déjà là'
+  ).slice(0, 220) || 'both looking at the phone camera as if taking a selfie together, heads close'
   const starDescription = sanitizeSceneText(
     dual
       ? (domain ? `${starName} (${domain})` : starName)
@@ -1195,34 +1204,34 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     'IMAGE ORDER:',
     '- image_input[0] = SOURCE photo (user + scene). Keep this photo as the visual foundation.',
     ...(dual
-      ? [`- image_input[1] = FACE/HAIR identity only for ${starName}. Ignore its background, pose, clothes, crop, and quality.`]
+      ? [`- Second image = FACE/HAIR identity for ${starName}, plus their general personal aesthetic. Do not copy the exact outfit, crop, background, or photo quality.`]
       : []),
     '',
-    `GOAL: insert ${starName} into the source photo as if they were really there. Candid amateur smartphone snapshot, not a collage or studio shoot.`,
+    `GOAL: insert ${starName} into a selfie with the user — both looking at the phone camera, celebrity beside them (not behind). Candid amateur smartphone snapshot, not a collage or studio shoot.`,
     '',
     'USER: keep the same person — same face, hair, identity, body. Tiny pose tweaks OK for a natural interaction. Do not beautify, rejuvenate, or replace them.',
     'SCENE: keep the same place, lighting, framing, objects, amateur feel. Do not rebuild the location or invent furniture.',
     ...(dual
       ? [
-          `CELEBRITY: match face and hair to image_input[1] (not a generic lookalike, not blended with the user). Dress them for THIS scene. Pose/lighting may change; identity must not.`,
+          `CELEBRITY: match face and hair to image_input[1] (not a generic lookalike, not blended with the user). Adapt the outfit to THIS setting while keeping a style consistent with their reference appearance and recognizable personal aesthetic. Do not copy the exact reference outfit, but do not invent a completely unrelated fashion style. Pose/lighting may change; identity must not.`,
         ]
       : [`CELEBRITY: ${starDescription}. Dress them for THIS scene.`]),
     ...(placement
       ? [
-          'PLACEMENT (follow this, not a generic empty-space insert):',
+          'PLACEMENT (use this for LEFT vs RIGHT / where space exists):',
           placement,
-          `If this conflicts with "${sceneIntent}", keep the placement above.`,
+          'Keep that side/space. If it puts the celebrity behind, farther back, or as a background figure, move them beside the user on the same camera plane instead.',
         ]
       : [
-          `Place ${starName} with a posture matching: ${sceneIntent}. Ignore that intent if it would rebuild the scene.`,
+          `Place ${starName} beside the user in the free space, same camera plane, selfie posture: ${sceneIntent}. Ignore that intent if it would rebuild the scene or push them behind.`,
         ]),
-    'INTERACTION: believable proximity, relaxed posture, candid body language. Not two stiff cutouts.',
+    'SELFIE LOCK: this is a selfie taken by the user. Place the celebrity next to them on the same camera plane, in the free space (left or right), in close natural proximity — heads close, slight lean-in, relaxed, maybe a light shoulder/arm touch if it fits. Never stiff, never distant, never behind, never a tiny background figure. Both look toward the phone, like a real shared selfie.',
     'LIGHTING: match the source photo (direction, warmth, sharpness, grain). Real contact shadows.',
-    'The inserted celebrity must inherit the photographic imperfections of the SOURCE photo: same sharpness, noise, compression, exposure, color response and phone-camera quality. Do not improve the source photo to match the celebrity. Adapt/degrade the celebrity to the source when necessary.',
+    'Faces stay identity-locked. Tiny pose tweaks for a relaxed close selfie are allowed — never two stiff distant cutouts.',
     ...photorealismBlock(starName),
     ...photoEditHeightLines(ctx),
     '',
-    'FORBIDDEN: face-swap artifacts, sticker/cutout look, studio/glamour, rebuilding the scene, removing important objects, changing the user\'s face or hair, physically impossible placement.',
+    'FORBIDDEN: face-swap artifacts, sticker/cutout look, studio/glamour, rebuilding the scene, removing important objects, changing the user\'s face or hair, celebrity behind/far/background, physically impossible placement.',
     `PRIORITY 1: preserve the source photo. PRIORITY 2: natural integration of ${starName}.`,
   ].filter((line) => line !== '').join('\n')
 }
@@ -1454,38 +1463,262 @@ async function createTask(
   return json.data.taskId
 }
 
-async function pollTask(taskId: string, apiKey: string): Promise<string> {
-  const deadline = Date.now() + POLL_TIMEOUT_MS
+type KieTaskState = 'pending' | 'success' | 'fail'
 
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+interface KieTaskSnapshot {
+  state: KieTaskState
+  resultUrl?: string
+  failMsg?: string
+}
 
-    const res = await fetch(
-      `${KIE_API_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`,
-      { headers: { Authorization: `Bearer ${apiKey}` } }
-    )
-    const json = await res.json() as {
-      code: number
-      msg?: string
-      data?: { state: string; resultJson?: string; failMsg?: string }
-    }
-    if (json.code !== 200) {
-      throw new Error(`kie.ai poll: ${json.msg ?? 'erreur'} (code ${json.code})`)
-    }
-    const record = json.data
-    if (!record) continue
+interface GenerationJobRow {
+  id: string
+  session_id: string
+  user_id: string | null
+  kie_task_id: string
+  celebrity_name: string
+  scene_summary: string | null
+  creation_mode: string | null
+  analysis_id: string | null
+  status: 'pending' | 'success' | 'failed'
+  fail_message: string | null
+  result_url: string | null
+  generation_id: string | null
+  credit_consumed: boolean
+  created_at: string
+}
 
-    if (record.state === 'success') {
-      const parsed = JSON.parse(record.resultJson ?? '{}') as { resultUrls?: string[] }
-      const url = parsed.resultUrls?.[0]
-      if (!url) throw new Error('Nano Banana 2: pas d\'URL dans le résultat')
-      return url
-    }
-    if (record.state === 'fail') {
-      throw new Error(`Nano Banana 2 échoué: ${record.failMsg ?? 'inconnu'}`)
-    }
+async function fetchKieTaskOnce(taskId: string, apiKey: string): Promise<KieTaskSnapshot> {
+  const res = await fetch(
+    `${KIE_API_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`,
+    { headers: { Authorization: `Bearer ${apiKey}` } }
+  )
+  const json = await res.json() as {
+    code: number
+    msg?: string
+    data?: { state: string; resultJson?: string; failMsg?: string }
   }
-  throw new Error('Nano Banana 2: timeout — la génération n’a pas renvoyé d’image à temps')
+  if (json.code !== 200) {
+    throw new Error(`kie.ai poll: ${json.msg ?? 'erreur'} (code ${json.code})`)
+  }
+  const record = json.data
+  if (!record || record.state === 'waiting' || record.state === 'processing' || record.state === 'pending') {
+    return { state: 'pending' }
+  }
+  if (record.state === 'success') {
+    const parsed = JSON.parse(record.resultJson ?? '{}') as { resultUrls?: string[] }
+    const url = parsed.resultUrls?.[0]
+    if (!url) throw new Error('Nano Banana 2: pas d\'URL dans le résultat')
+    return { state: 'success', resultUrl: url }
+  }
+  if (record.state === 'fail') {
+    return { state: 'fail', failMsg: record.failMsg ?? 'inconnu' }
+  }
+  return { state: 'pending' }
+}
+
+async function downloadImageAsDataUrl(resultUrl: string): Promise<string> {
+  const imgRes = await fetch(resultUrl)
+  const imgBuf = await imgRes.arrayBuffer()
+  const contentType = imgRes.headers.get('content-type') ?? 'image/jpeg'
+  const b64 = arrayBufferToBase64(imgBuf)
+  return `data:${contentType};base64,${b64}`
+}
+
+async function refundGenerationCredit(
+  db: ReturnType<typeof createClient>,
+  billingSessionId: string,
+): Promise<number | undefined> {
+  try {
+    const { data: refundRaw } = await db.rpc('refund_generation_credit', {
+      p_session_id: billingSessionId,
+      p_amount: GENERATION_CREDIT_COST,
+    })
+    const refund = refundRaw as { ok?: boolean; new_balance?: number } | null
+    if (refund?.ok && typeof refund.new_balance === 'number') {
+      return refund.new_balance
+    }
+    const { data: sess } = await db
+      .from('sessions')
+      .select('credits_balance')
+      .eq('id', billingSessionId)
+      .maybeSingle()
+    const bal = (sess?.credits_balance ?? 0) + GENERATION_CREDIT_COST
+    await db.from('sessions').update({ credits_balance: bal }).eq('id', billingSessionId)
+    await db.from('credit_transactions').insert({
+      session_id: billingSessionId,
+      amount: GENERATION_CREDIT_COST,
+      reason: 'refund',
+      reference_id: null,
+    })
+    return bal
+  } catch (refundErr) {
+    console.warn('[generate] credit refund failed:', refundErr)
+    return undefined
+  }
+}
+
+async function insertGenerationRecord(
+  db: ReturnType<typeof createClient>,
+  row: {
+    session_id: string
+    analysis_id?: string | null
+    celebrity_name: string
+    scene_summary?: string | null
+    creation_mode: CelebrityCreationMode
+    user_id: string
+  },
+): Promise<string | undefined> {
+  const generationRow = {
+    session_id: row.session_id,
+    analysis_id: row.analysis_id?.trim() ? row.analysis_id.trim() : null,
+    celebrity_name: row.celebrity_name,
+    unlocked: true,
+    scene_summary: row.scene_summary || null,
+    user_id: row.user_id,
+  }
+
+  let inserted = await db
+    .from('generations')
+    .insert({ ...generationRow, creation_mode: row.creation_mode })
+    .select('id')
+    .single()
+
+  if (inserted.error) {
+    inserted = await db.from('generations').insert(generationRow).select('id').single()
+  }
+
+  return inserted.data?.id
+}
+
+async function handlePollJob(
+  pollJobId: string,
+  authUser: User,
+  db: ReturnType<typeof createClient>,
+  kieKey: string,
+): Promise<Response> {
+  const { data: jobRaw, error: jobErr } = await db
+    .from('generation_jobs')
+    .select('*')
+    .eq('id', pollJobId)
+    .maybeSingle()
+
+  if (jobErr || !jobRaw) {
+    return new Response(
+      JSON.stringify({ error: 'Génération introuvable. Relance une nouvelle photo.', code: 'GENERATION_JOB_NOT_FOUND' }),
+      { status: 404, headers: { ...CORS, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const job = jobRaw as GenerationJobRow
+  if (job.user_id && job.user_id !== authUser.id) {
+    return new Response(
+      JSON.stringify({ error: 'Accès refusé à cette génération.', code: 'GENERATION_JOB_FORBIDDEN' }),
+      { status: 403, headers: { ...CORS, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const jobAgeMs = Date.now() - new Date(job.created_at).getTime()
+  if (jobAgeMs > JOB_MAX_AGE_MS) {
+    if (job.status === 'pending' && job.credit_consumed) {
+      await refundGenerationCredit(db, job.session_id)
+      await db.from('generation_jobs').update({
+        status: 'failed',
+        fail_message: 'expired',
+        updated_at: new Date().toISOString(),
+      }).eq('id', job.id)
+    }
+    return new Response(
+      JSON.stringify({
+        error: 'La génération a expiré. Réessaie — ton crédit a été remboursé si besoin.',
+        code: 'GENERATION_JOB_EXPIRED',
+      }),
+      { status: 408, headers: { ...CORS, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  if (job.status === 'success') {
+    const resultUrl = job.result_url
+    if (!resultUrl) {
+      return new Response(
+        JSON.stringify({
+          status: 'success',
+          generationId: job.generation_id ?? undefined,
+          message: 'Photo déjà générée.',
+        }),
+        { headers: { ...CORS, 'Content-Type': 'application/json' } }
+      )
+    }
+    const generatedBase64 = await downloadImageAsDataUrl(resultUrl)
+    return new Response(
+      JSON.stringify({
+        status: 'success',
+        imageBase64: generatedBase64,
+        generationId: job.generation_id ?? undefined,
+      }),
+      { headers: { ...CORS, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  if (job.status === 'failed') {
+    return new Response(
+      JSON.stringify({
+        error: job.fail_message ?? 'Nano Banana 2 échoué',
+        code: 'GENERATION_FAILED',
+      }),
+      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const snapshot = await fetchKieTaskOnce(job.kie_task_id, kieKey)
+  if (snapshot.state === 'pending') {
+    return new Response(
+      JSON.stringify({ status: 'pending', pollJobId: job.id }),
+      { headers: { ...CORS, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  if (snapshot.state === 'fail') {
+    const failMessage = `Nano Banana 2 échoué: ${snapshot.failMsg ?? 'inconnu'}`
+    if (job.credit_consumed) {
+      await refundGenerationCredit(db, job.session_id)
+    }
+    await db.from('generation_jobs').update({
+      status: 'failed',
+      fail_message: failMessage,
+      updated_at: new Date().toISOString(),
+    }).eq('id', job.id)
+    return new Response(
+      JSON.stringify({ error: failMessage }),
+      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const generatedBase64 = await downloadImageAsDataUrl(snapshot.resultUrl!)
+  const generationId = await insertGenerationRecord(db, {
+    session_id: job.session_id,
+    analysis_id: job.analysis_id,
+    celebrity_name: job.celebrity_name,
+    scene_summary: job.scene_summary,
+    creation_mode: (job.creation_mode as CelebrityCreationMode) ?? 'full_generation',
+    user_id: authUser.id,
+  })
+
+  await db.from('generation_jobs').update({
+    status: 'success',
+    result_url: snapshot.resultUrl,
+    generation_id: generationId ?? null,
+    updated_at: new Date().toISOString(),
+  }).eq('id', job.id)
+
+  return new Response(
+    JSON.stringify({
+      status: 'success',
+      imageBase64: generatedBase64,
+      generationId,
+    }),
+    { headers: { ...CORS, 'Content-Type': 'application/json' } }
+  )
 }
 
 Deno.serve(async (req: Request) => {
@@ -1506,8 +1739,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json() as {
-      imageBase64: string
-      celebrityName: string
+      pollJobId?: string
+      imageBase64?: string
+      celebrityName?: string
       celebrityDomain?: string
       celebrityStyleDescription?: string
       celebrityTraits?: string[]
@@ -1525,6 +1759,16 @@ Deno.serve(async (req: Request) => {
       analysisId?: string
       userId?: string
       email?: string
+    }
+
+    const db = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      { auth: { persistSession: false } }
+    )
+
+    if (typeof body.pollJobId === 'string' && body.pollJobId.trim()) {
+      return await handlePollJob(body.pollJobId.trim(), authUser, db, kieKey)
     }
 
     const {
@@ -1618,16 +1862,10 @@ Deno.serve(async (req: Request) => {
             : mode === 'custom'
               ? customPrompt?.trim()
               : undefined,
-      interaction: interaction?.trim() || undefined,
+      interaction: creationMode === 'photo_edit' ? 'selfie' : (interaction?.trim() || undefined),
       hasCelebrityReferenceImage: Boolean(celebrityImageBase64),
       userHeightCm,
     }
-
-    const db = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-      { auth: { persistSession: false } }
-    )
 
     // Bypass crédits : uniquement JWT + rôle DB super_admin.
     const appRole = await resolveAppRole(db, authUser.id)
@@ -1763,7 +2001,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    let generatedBase64: string
+    let pollJobId: string | undefined
     const tempPaths: string[] = []
     try {
       const imageUrl = await resolveReferenceImageUrl(imageBase64, kieKey, tempPaths)
@@ -1771,79 +2009,46 @@ Deno.serve(async (req: Request) => {
       if (celebrityImageBase64) {
         imageUrls.push(await resolveReferenceImageUrl(celebrityImageBase64, kieKey, tempPaths))
       }
-      const taskId = await createTask(imageUrls, generationContext, kieKey)
-      const resultUrl = await pollTask(taskId, kieKey)
+      const kieTaskId = await createTask(imageUrls, generationContext, kieKey)
 
-      const imgRes = await fetch(resultUrl)
-      const imgBuf = await imgRes.arrayBuffer()
-      const contentType = imgRes.headers.get('content-type') ?? 'image/jpeg'
-      const b64 = arrayBufferToBase64(imgBuf)
-      generatedBase64 = `data:${contentType};base64,${b64}`
+      const { data: jobRow, error: jobInsertErr } = await db
+        .from('generation_jobs')
+        .insert({
+          session_id: billingSessionId,
+          user_id: userId,
+          kie_task_id: kieTaskId,
+          celebrity_name: celebrityName,
+          scene_summary: sceneSummary || null,
+          creation_mode: creationMode,
+          analysis_id: analysisId?.trim() ? analysisId.trim() : null,
+          status: 'pending',
+          credit_consumed: creditReserved,
+        })
+        .select('id')
+        .single()
+
+      if (jobInsertErr || !jobRow?.id) {
+        throw new Error(jobInsertErr?.message ?? 'Impossible d’enregistrer la génération en cours')
+      }
+      pollJobId = jobRow.id as string
     } catch (genErr) {
-      // Rembourse le crédit réservé si la génération IA échoue
       if (creditReserved && billingSessionId) {
-        try {
-          const { data: refundRaw } = await db.rpc('refund_generation_credit', {
-            p_session_id: billingSessionId,
-            p_amount: GENERATION_CREDIT_COST,
-          })
-          const refund = refundRaw as { ok?: boolean; new_balance?: number } | null
-          if (refund?.ok && typeof refund.new_balance === 'number') {
-            creditsBalance = refund.new_balance
-          } else {
-            const { data: sess } = await db
-              .from('sessions')
-              .select('credits_balance')
-              .eq('id', billingSessionId)
-              .maybeSingle()
-            const bal = (sess?.credits_balance ?? 0) + GENERATION_CREDIT_COST
-            await db.from('sessions').update({ credits_balance: bal }).eq('id', billingSessionId)
-            await db.from('credit_transactions').insert({
-              session_id: billingSessionId,
-              amount: GENERATION_CREDIT_COST,
-              reason: 'refund',
-              reference_id: null,
-            })
-            creditsBalance = bal
-          }
-        } catch (refundErr) {
-          console.warn('[generate] credit refund failed:', refundErr)
-        }
+        const refunded = await refundGenerationCredit(db, billingSessionId)
+        if (typeof refunded === 'number') creditsBalance = refunded
       }
       throw genErr
     } finally {
       await removeTempObjects(tempPaths)
     }
 
-    let generationId: string | undefined
-
-    try {
-      const generationRow = {
-        session_id: billingSessionId,
-        analysis_id: analysisId?.trim() ? analysisId.trim() : null,
-        celebrity_name: celebrityName,
-        unlocked: true,
-        scene_summary: sceneSummary || null,
-        user_id: userId,
-      }
-
-      let inserted = await db
-        .from('generations')
-        .insert({ ...generationRow, creation_mode: creationMode })
-        .select('id')
-        .single()
-
-      if (inserted.error) {
-        inserted = await db.from('generations').insert(generationRow).select('id').single()
-      }
-
-      generationId = inserted.data?.id
-    } catch (dbErr) {
-      console.warn('[generate] generation insert failed:', dbErr)
-    }
-
     return new Response(
-      JSON.stringify({ imageBase64: generatedBase64, generationId, creditsBalance }),
+      JSON.stringify({
+        status: 'pending',
+        pollJobId,
+        pollIntervalMs: POLL_INTERVAL_MS,
+        pollTimeoutMs: CLIENT_POLL_TIMEOUT_MS,
+        creditsBalance,
+      }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } }
     )
   } catch (err) {
