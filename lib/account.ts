@@ -47,3 +47,25 @@ export interface AccountData {
   generations: AccountGeneration[]
   transactions: AccountTransaction[]
 }
+
+function accountIsUnlimited(account: AccountData): boolean {
+  if (account.hasUnlimitedAccess === true) return true
+  return account.role === 'super_admin'
+}
+
+/**
+ * Compte déjà actif (crédits ou achat passé) : pas de teaser flouté « déverrouiller son jumeau ».
+ */
+export function accountCanSkipTwinUnlock(account: AccountData | null | undefined): boolean {
+  if (!account) return false
+  if (accountIsUnlimited(account)) return true
+  if (account.creditsBalance > 0) return true
+  return account.transactions.some((t) => t.amount > 0)
+}
+
+/** Peut révéler le jumeau sans repasser par la page paiement. */
+export function accountCanRevealTwin(account: AccountData | null | undefined): boolean {
+  if (!account) return false
+  if (accountIsUnlimited(account)) return true
+  return account.creditsBalance > 0
+}

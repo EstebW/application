@@ -11,7 +11,7 @@ interface UserHeightFieldProps {
 }
 
 /**
- * Taille de l'utilisateur — parcours « Choisis ta star » uniquement.
+ * Taille de l'utilisateur — parcours « Choisis ta star » et « Trouve ton jumeau ».
  * On ne demande jamais la taille de la célébrité : elle est résolue côté serveur.
  */
 export default function UserHeightField({ value, onChange }: UserHeightFieldProps) {

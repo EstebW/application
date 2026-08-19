@@ -26,18 +26,17 @@ const up = {
 }
 
 export default function SignupGate({ score, sessionId, onBeforeGoogle, onSuccess }: SignupGateProps) {
-  const [firstName, setFirstName] = useState('')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!username.trim()) { setError('Entre ton nom d\'utilisateur pour continuer'); return }
     if (!email.trim()) { setError('Entre ton email pour continuer'); return }
     if (password.length < 6) { setError('Le mot de passe doit contenir au moins 6 caractères'); return }
-    if (password !== confirmPassword) { setError('Les mots de passe ne correspondent pas'); return }
 
     setError('')
     setLoading(true)
@@ -59,7 +58,7 @@ export default function SignupGate({ score, sessionId, onBeforeGoogle, onSuccess
       }>('register', {
         sessionId: sessionId || undefined,
         email: email.trim(),
-        firstName: firstName.trim() || undefined,
+        firstName: username.trim(),
         userId: user.id,
       })
 
@@ -69,7 +68,7 @@ export default function SignupGate({ score, sessionId, onBeforeGoogle, onSuccess
 
       setStoredSessionId(reg.sessionId)
       setStoredEmail(email.trim())
-      onSuccess(firstName.trim() || 'toi', email.trim(), {
+      onSuccess(username.trim(), email.trim(), {
         sessionId: reg.sessionId,
         creditsBalance: reg.creditsBalance ?? 0,
       })
@@ -172,11 +171,12 @@ export default function SignupGate({ score, sessionId, onBeforeGoogle, onSuccess
       <motion.form variants={up} onSubmit={handleSubmit} className="w-full space-y-3">
         <input
           type="text"
-          placeholder="Ton prénom (optionnel)"
-          value={firstName}
-          onChange={(e) => setFirstName(e.target.value)}
+          placeholder="Nom d'utilisateur *"
+          value={username}
+          onChange={(e) => { setUsername(e.target.value); setError('') }}
           className={inputClass}
-          autoComplete="given-name"
+          required
+          autoComplete="username"
         />
 
         <input
@@ -194,16 +194,6 @@ export default function SignupGate({ score, sessionId, onBeforeGoogle, onSuccess
           placeholder="Mot de passe (6 caractères min.) *"
           value={password}
           onChange={(e) => { setPassword(e.target.value); setError('') }}
-          className={inputClass}
-          required
-          autoComplete="new-password"
-        />
-
-        <input
-          type="password"
-          placeholder="Confirmer le mot de passe *"
-          value={confirmPassword}
-          onChange={(e) => { setConfirmPassword(e.target.value); setError('') }}
           className={inputClass}
           required
           autoComplete="new-password"

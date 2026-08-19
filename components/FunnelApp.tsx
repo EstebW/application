@@ -27,6 +27,7 @@ import type { CelebrityCreationMode, CelebrityResult, GenerationRequest } from '
 import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { callFunction } from '@/lib/functions'
 import type { AccountData } from '@/lib/account'
+import { accountCanRevealTwin, accountCanSkipTwinUnlock } from '@/lib/account'
 import { accountHasUnlimitedAccess } from '@/lib/roles'
 import { supabase } from '@/lib/supabase'
 import {
@@ -153,7 +154,7 @@ export default function FunnelApp() {
   // Parcours « Choisis ta star » uniquement — le funnel « jumeau » reste en full_generation.
   const [creationMode, setCreationMode] = useState<CelebrityCreationMode | undefined>()
   const [basePhoto, setBasePhoto] = useState('')
-  // Taille utilisateur — parcours « Choisis ta star » uniquement.
+  // Taille utilisateur — collectée dans « Choisis ta star » ou « Trouve ton jumeau ».
   const [userHeightCm, setUserHeightCm] = useState<number | undefined>()
   const [hasUnlocked, setHasUnlocked] = useState(false)
   const [generatedImage, setGeneratedImage] = useState('')
@@ -214,7 +215,7 @@ export default function FunnelApp() {
     setUserFirstName(data.firstName?.trim() || null)
     const unlimited = accountHasUnlimitedAccess(data)
     setUnlimitedAccess(unlimited)
-    if (unlimited) setHasUnlocked(true)
+    if (accountCanSkipTwinUnlock(data)) setHasUnlocked(true)
   }, [])
 
   const refreshAccount = useCallback(async (opts: { sessionId?: string; userId?: string; email?: string }) => {
@@ -303,7 +304,7 @@ export default function FunnelApp() {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
-  /** Après teaser / star : paywall (sauf Super Admin — accès illimité serveur). */
+  /** Après teaser / star : inscription ou paiement ; comptes avec crédits vont direct au résultat. */
   const routeToUnlock = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
 
@@ -333,7 +334,8 @@ export default function FunnelApp() {
         setUserEmail(data.email)
         setStoredEmail(data.email)
       }
-      if (accountHasUnlimitedAccess(data)) {
+      if (accountCanRevealTwin(data)) {
+        setHasUnlocked(true)
         goTo(appMode === 'match' ? 'result' : 'customize')
         return
       }
@@ -341,7 +343,7 @@ export default function FunnelApp() {
       // ignore
     }
 
-    // Utilisateurs normaux : toujours passer par la page paiement
+    // Compte existant sans crédit : paiement direct (plus de teaser flouté si déjà client).
     goTo('payment')
   }, [sessionId, userEmail, appMode, applyAccountFlags])
 
@@ -422,12 +424,34 @@ export default function FunnelApp() {
 
   const handleAnalyze = useCallback(() => goTo('analyzing'), [])
 
-  const handleAnalysisComplete = useCallback((result: CelebrityResult & { analysisId?: string }) => {
+  const handleAnalysisComplete = useCallback(async (result: CelebrityResult & { analysisId?: string }) => {
     setCelebrity(result)
     if (result.analysisId) setAnalysisId(result.analysisId)
     prefetchCelebrityImage(result.name)
+
+    if (hasUnlocked || unlimitedAccess || creditsBalance > 0) {
+      goTo('result')
+      return
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      const data = await callFunction<AccountData>('account', {
+        userId: user?.id,
+        sessionId: sessionId || undefined,
+        email: user?.email ?? userEmail,
+      })
+      applyAccountFlags(data)
+      if (accountCanSkipTwinUnlock(data)) {
+        goTo(accountCanRevealTwin(data) ? 'result' : 'payment')
+        return
+      }
+    } catch {
+      // ignore
+    }
+
     goTo('teaser')
-  }, [])
+  }, [hasUnlocked, creditsBalance, unlimitedAccess, sessionId, userEmail, applyAccountFlags, goTo])
 
   const handleReveal = useCallback(() => {
     void routeToUnlock()
@@ -459,7 +483,7 @@ export default function FunnelApp() {
         email: email || user?.email || userEmail,
       })
       applyAccountFlags(data)
-      if (accountHasUnlimitedAccess(data)) {
+      if (accountCanRevealTwin(data)) {
         goTo(appMode === 'match' ? 'result' : 'customize')
         return
       }
@@ -468,7 +492,7 @@ export default function FunnelApp() {
     }
 
     goTo('payment')
-  }, [sessionId, userEmail, appMode, applyAccountFlags])
+  }, [sessionId, userEmail, appMode, applyAccountFlags, goTo])
 
   const handlePaymentSuccess = useCallback((newBalance: number) => {
     setCreditsBalance(newBalance)
@@ -531,14 +555,14 @@ export default function FunnelApp() {
       if (typeof ctx?.userHeightCm === 'number') setUserHeightCm(ctx.userHeightCm)
       if (ctx?.appMode === 'match' || ctx?.appMode === 'custom') setAppMode(ctx.appMode)
 
-      // Super Admin : skip paywall ; sinon paiement
+      // Compte avec crédits ou accès illimité : révélation directe
       try {
         const data = await callFunction<AccountData>('account', {
           userId: user.id,
           email: user.email ?? undefined,
         })
         applyAccountFlags(data)
-        if (accountHasUnlimitedAccess(data)) {
+        if (accountCanRevealTwin(data)) {
           goTo((ctx?.appMode ?? appMode) === 'match' ? 'result' : 'customize')
           return
         }
@@ -653,6 +677,10 @@ export default function FunnelApp() {
   }, [])
 
   const handleSceneSubmit = useCallback((request: GenerationRequest) => {
+    if (request.userHeightCm) {
+      setUserHeightCm(request.userHeightCm)
+      setStoredUserHeightCm(request.userHeightCm)
+    }
     setGenerationRequest(request)
     goTo('generating')
   }, [])
@@ -991,6 +1019,8 @@ export default function FunnelApp() {
                 onChangeBasePhoto={handleChangeBasePhoto}
                 onChangeUserPhoto={appMode === 'custom' ? handleChangeUserPhoto : undefined}
                 enableSceneSource={appMode === 'custom'}
+                collectUserHeight={appMode === 'match'}
+                initialUserHeightCm={userHeightCm}
                 onSubmit={handleSceneSubmit}
                 onNeedCredits={handleInsufficientCredits}
               />
@@ -1007,7 +1037,7 @@ export default function FunnelApp() {
                 celebrityImageBase64={celebrityPhoto || undefined}
                 generationRequest={generationRequest}
                 creationMode={appMode === 'custom' ? (creationMode ?? DEFAULT_CREATION_MODE) : DEFAULT_CREATION_MODE}
-                userHeightCm={appMode === 'custom' ? userHeightCm : undefined}
+                userHeightCm={userHeightCm ?? generationRequest.userHeightCm}
                 sessionId={sessionId}
                 userId={userId}
                 email={userEmail}

@@ -1,12 +1,11 @@
 import type { PhotoGenerationContext } from './types'
 
 /**
- * Contrainte de taille réelle — parcours « Choisis ta star » uniquement.
+ * Contrainte de taille réelle — parcours « Choisis ta star » et « Trouve ton jumeau ».
  *
- * Le bloc n'existe que si l'utilisateur a renseigné sa taille : le parcours
- * « jumeau célèbre » n'envoie jamais userHeightCm et n'est donc pas impacté.
- * Sans taille de star fiable, on retombe sur une contrainte visuelle souple
- * plutôt que de bloquer la génération.
+ * Le bloc n'existe que si l'utilisateur a renseigné sa taille. Sans taille de star
+ * fiable, on retombe sur une contrainte visuelle souple plutôt que de bloquer
+ * la génération.
  *
  * Module volontairement sans import exécutable : il doit rester copiable tel
  * quel dans l'Edge Function `generate` (Deno ne peut pas importer lib/).

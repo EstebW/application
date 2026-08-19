@@ -82,10 +82,12 @@ export interface GenerationRequest {
   customPrompt?: string
   /** Facultatif — n'autorise jamais à contourner la préservation d'identité */
   interaction?: string
+  /** Taille utilisateur (cm) — collectée avant génération si le parcours le demande */
+  userHeightCm?: number
 }
 
 /**
- * Contrainte de taille — parcours « Choisis ta star » uniquement.
+ * Contrainte de taille — les deux parcours photo.
  * L'utilisateur ne renseigne QUE sa propre taille ; celle de la star est
  * résolue côté serveur à partir de son identifiant.
  */

@@ -117,7 +117,18 @@ describe('bloc de prompt', () => {
     mode: 'presets',
   }
 
-  it('est absent quand aucune taille n\'est renseignée (parcours jumeau célèbre)', () => {
+  it('injecte les proportions pour le parcours jumeau (full_generation)', () => {
+    const text = heightConsistencyBlock({
+      ...base,
+      creationMode: 'full_generation',
+      userHeightCm: 182,
+      celebrityHeightCm: 170,
+    }).join('\n')
+    assert.match(text, /PHYSICAL HEIGHT, SCALE AND PERSPECTIVE CONSISTENCY/)
+    assert.match(text, /celebrity's real height is 170 centimeters/)
+  })
+
+  it('est absent quand aucune taille n\'est renseignée', () => {
     assert.deepEqual(heightConsistencyBlock(base), [])
   })
 

@@ -14,6 +14,8 @@ import type {
 import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { CUSTOM_PROMPT_EXAMPLES, getDefaultScene, getSceneSuggestions } from '@/lib/scene-suggestions'
 import { INTERACTION_OPTIONS } from '@/lib/interactions'
+import UserHeightField from './UserHeightField'
+import { parseUserHeightCm } from '@/lib/height'
 
 interface PhotoSceneCustomizerProps {
   celebrity: CelebrityResult
@@ -32,6 +34,10 @@ interface PhotoSceneCustomizerProps {
   onChangeUserPhoto?: () => void
   /** Parcours « Choisis ta star » uniquement — jumeau reste sur les scènes inventées */
   enableSceneSource?: boolean
+  /** Parcours « Trouve ton jumeau » : demander la taille avant génération */
+  collectUserHeight?: boolean
+  /** Taille déjà connue (profil ou parcours star) — préremplit le champ jumeau */
+  initialUserHeightCm?: number
   onSubmit: (request: GenerationRequest) => void
   onNeedCredits?: () => void
 }
@@ -156,6 +162,8 @@ export default function PhotoSceneCustomizer({
   onChangeBasePhoto,
   onChangeUserPhoto,
   enableSceneSource = false,
+  collectUserHeight = false,
+  initialUserHeightCm,
   onSubmit,
   onNeedCredits,
 }: PhotoSceneCustomizerProps) {
@@ -170,6 +178,13 @@ export default function PhotoSceneCustomizer({
   const [customPrompt, setCustomPrompt] = useState(initialRequest?.customPrompt ?? '')
   const [interaction, setInteraction] = useState<string | undefined>(initialRequest?.interaction)
   const [editNote, setEditNote] = useState(isPhotoEdit ? initialRequest?.customPrompt ?? '' : '')
+  const [heightInput, setHeightInput] = useState(
+    () => String(initialUserHeightCm ?? initialRequest?.userHeightCm ?? '')
+  )
+
+  const parsedUserHeight = parseUserHeightCm(heightInput)
+  const heightRequired = collectUserHeight && !isPhotoEdit
+  const heightOk = !heightRequired || parsedUserHeight !== null
 
   const keepUserScene = !isPhotoEdit && enableSceneSource && sceneSource === 'user_photo'
   const hasCredits = hasUnlimitedAccess || creditsBalance === undefined || creditsBalance > 0
@@ -178,8 +193,12 @@ export default function PhotoSceneCustomizer({
   const canSubmit = isPhotoEdit
     ? hasCredits && Boolean(basePhoto)
     : keepUserScene
-      ? hasCredits && Boolean(userPhoto)
-      : hasCredits && (mode === 'presets' ? Boolean(canSubmitPresets) : canSubmitCustom)
+      ? hasCredits && Boolean(userPhoto) && heightOk
+      : hasCredits && heightOk && (mode === 'presets' ? Boolean(canSubmitPresets) : canSubmitCustom)
+
+  const heightPayload = heightRequired && parsedUserHeight !== null
+    ? { userHeightCm: parsedUserHeight }
+    : {}
 
   const handleSubmit = () => {
     if (!hasCredits) {
@@ -201,6 +220,7 @@ export default function PhotoSceneCustomizer({
         creationMode,
         sceneSource: 'user_photo',
         interaction,
+        ...heightPayload,
       })
       return
     }
@@ -211,6 +231,7 @@ export default function PhotoSceneCustomizer({
         ...(enableSceneSource ? { sceneSource: 'invented' as const } : {}),
         photoScene: scene,
         interaction,
+        ...heightPayload,
       })
     } else {
       onSubmit({
@@ -219,6 +240,7 @@ export default function PhotoSceneCustomizer({
         ...(enableSceneSource ? { sceneSource: 'invented' as const } : {}),
         customPrompt: customPrompt.trim(),
         interaction,
+        ...heightPayload,
       })
     }
   }
@@ -489,6 +511,10 @@ export default function PhotoSceneCustomizer({
             onChange={setInteraction}
             hint={`Comment êtes-vous l'un par rapport à l'autre avec ${name} ?`}
           />
+        )}
+
+        {heightRequired && (
+          <UserHeightField value={heightInput} onChange={setHeightInput} />
         )}
       </motion.div>
 

@@ -1865,8 +1865,7 @@ Deno.serve(async (req: Request) => {
       throw new Error('photoScene (lieu, tenues, position) requis')
     }
 
-    // Taille utilisateur : facultative (le parcours « jumeau célèbre » n'en
-    // envoie jamais) mais revalidée dès qu'elle est présente.
+    // Taille utilisateur : facultative ; revalidée dès qu'elle est présente (star + jumeau).
     if (body.userHeightCm !== undefined && !isValidUserHeightCm(body.userHeightCm)) {
       throw new Error(
         `userHeightCm invalide (entier attendu entre ${MIN_USER_HEIGHT_CM} et ${MAX_USER_HEIGHT_CM} cm)`
