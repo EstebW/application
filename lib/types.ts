@@ -1,4 +1,5 @@
 import type { CelebrityHeightConfidence } from './height'
+import type { PhotoAspectRatio } from './photo-format'
 import type { FeatureScores } from './twin-score'
 
 export type { CelebrityHeightConfidence, FeatureScores }
@@ -84,6 +85,8 @@ export interface GenerationRequest {
   interaction?: string
   /** Taille utilisateur (cm) — collectée avant génération si le parcours le demande */
   userHeightCm?: number
+  /** Format de sortie — transmis à Nano Banana 2 (aspect_ratio KIE) */
+  aspectRatio?: PhotoAspectRatio
 }
 
 /**
@@ -122,4 +125,6 @@ export interface PhotoGenerationContext extends HeightContext {
   celebrityPlacementInstruction?: string
   /** photo_edit : celebrityHeightCm / userHeightCm lorsque les deux tailles sont connues */
   celebrityTargetApparentHeightRatio?: number
+  /** Format de sortie KIE */
+  aspectRatio?: PhotoAspectRatio
 }

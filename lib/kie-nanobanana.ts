@@ -1,4 +1,5 @@
 import type { PhotoGenerationContext } from './types'
+import { DEFAULT_PHOTO_ASPECT_RATIO } from './photo-format'
 import { buildPhotoPrompt } from './scene-suggestions'
 import { formatKieError } from './kie-errors'
 import { createServerClient } from './supabase'
@@ -160,7 +161,7 @@ async function createTask(
       input: {
         prompt,
         image_input: imageUrls,
-        aspect_ratio: 'auto',
+        aspect_ratio: ctx.aspectRatio ?? DEFAULT_PHOTO_ASPECT_RATIO,
         resolution: '2K',
         output_format: 'jpg',
       },

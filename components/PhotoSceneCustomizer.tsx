@@ -15,7 +15,9 @@ import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { CUSTOM_PROMPT_EXAMPLES, getDefaultScene, getSceneSuggestions } from '@/lib/scene-suggestions'
 import { INTERACTION_OPTIONS } from '@/lib/interactions'
 import UserHeightField from './UserHeightField'
+import PhotoFormatPicker from './PhotoFormatPicker'
 import { parseUserHeightCm } from '@/lib/height'
+import { DEFAULT_PHOTO_ASPECT_RATIO, normalizePhotoAspectRatio, type PhotoAspectRatio } from '@/lib/photo-format'
 
 interface PhotoSceneCustomizerProps {
   celebrity: CelebrityResult
@@ -181,6 +183,9 @@ export default function PhotoSceneCustomizer({
   const [heightInput, setHeightInput] = useState(
     () => String(initialUserHeightCm ?? initialRequest?.userHeightCm ?? '')
   )
+  const [aspectRatio, setAspectRatio] = useState<PhotoAspectRatio>(
+    () => normalizePhotoAspectRatio(initialRequest?.aspectRatio ?? DEFAULT_PHOTO_ASPECT_RATIO)
+  )
 
   const parsedUserHeight = parseUserHeightCm(heightInput)
   const heightRequired = collectUserHeight && !isPhotoEdit
@@ -200,6 +205,8 @@ export default function PhotoSceneCustomizer({
     ? { userHeightCm: parsedUserHeight }
     : {}
 
+  const formatPayload = { aspectRatio }
+
   const handleSubmit = () => {
     if (!hasCredits) {
       onNeedCredits?.()
@@ -211,6 +218,7 @@ export default function PhotoSceneCustomizer({
         mode: 'presets',
         creationMode: 'photo_edit',
         customPrompt: editNote.trim() || undefined,
+        ...formatPayload,
       })
       return
     }
@@ -221,6 +229,7 @@ export default function PhotoSceneCustomizer({
         sceneSource: 'user_photo',
         interaction,
         ...heightPayload,
+        ...formatPayload,
       })
       return
     }
@@ -232,6 +241,7 @@ export default function PhotoSceneCustomizer({
         photoScene: scene,
         interaction,
         ...heightPayload,
+        ...formatPayload,
       })
     } else {
       onSubmit({
@@ -241,6 +251,7 @@ export default function PhotoSceneCustomizer({
         customPrompt: customPrompt.trim(),
         interaction,
         ...heightPayload,
+        ...formatPayload,
       })
     }
   }
@@ -516,6 +527,8 @@ export default function PhotoSceneCustomizer({
         {heightRequired && (
           <UserHeightField value={heightInput} onChange={setHeightInput} />
         )}
+
+        <PhotoFormatPicker value={aspectRatio} onChange={setAspectRatio} />
       </motion.div>
 
       <motion.div variants={up} className="w-full space-y-3">

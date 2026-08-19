@@ -92,6 +92,7 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
             ? undefined
             : generationRequest.customPrompt,
         interaction: generationRequest.interaction,
+        aspectRatio: generationRequest.aspectRatio,
         celebrityId: celebrityIdFromName(name),
         userHeightCm,
         sessionId,

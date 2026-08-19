@@ -69,6 +69,19 @@ const TEMP_SIGNED_URL_TTL_SEC = 300
 /** KIE Nano Banana refuse au-delà de 5000 caractères (prompt interne, pas le champ UI). */
 const KIE_PROMPT_MAX_CHARS = 4900
 
+/** Aligné sur lib/photo-format.ts — formats proposés dans l’UI. */
+const PHOTO_ASPECT_RATIOS = ['auto', '1:1', '4:3', '3:4', '16:9', '9:16'] as const
+type PhotoAspectRatio = (typeof PHOTO_ASPECT_RATIOS)[number]
+const DEFAULT_PHOTO_ASPECT_RATIO: PhotoAspectRatio = '4:3'
+
+function isValidPhotoAspectRatio(value: unknown): value is PhotoAspectRatio {
+  return typeof value === 'string' && (PHOTO_ASPECT_RATIOS as readonly string[]).includes(value)
+}
+
+function normalizePhotoAspectRatio(value: unknown): PhotoAspectRatio {
+  return isValidPhotoAspectRatio(value) ? value : DEFAULT_PHOTO_ASPECT_RATIO
+}
+
 /** Les erreurs Postgrest/Supabase sont des objets simples, pas des `Error` — sans
  *  ça, `err instanceof Error` échoue et masque le vrai message derrière "Erreur interne". */
 function getErrorMessage(err: unknown): string {
@@ -159,6 +172,8 @@ interface PhotoGenerationContext {
   userHeightCm?: number
   celebrityHeightCm?: number | null
   celebrityHeightConfidence?: CelebrityHeightConfidence
+  /** Format de sortie KIE (aspect_ratio) */
+  aspectRatio?: PhotoAspectRatio
 }
 
 /** Doit rester aligné sur lib/interactions.ts. */
@@ -1448,6 +1463,7 @@ async function createTask(
   const useEditModel =
     creationMode === 'photo_edit' && resolvePhotoEditModel() === 'google/nano-banana-edit'
   const resolution = resolveKieResolution(creationMode)
+  const aspectRatio = normalizePhotoAspectRatio(ctx.aspectRatio)
 
   const payload = useEditModel
     ? {
@@ -1455,7 +1471,7 @@ async function createTask(
         input: {
           prompt,
           image_urls: imageUrls,
-          aspect_ratio: 'auto',
+          aspect_ratio: aspectRatio,
           output_format: 'jpeg',
         },
       }
@@ -1464,7 +1480,7 @@ async function createTask(
         input: {
           prompt,
           image_input: imageUrls,
-          aspect_ratio: 'auto',
+          aspect_ratio: aspectRatio,
           resolution,
           output_format: 'jpg',
         },
@@ -1475,6 +1491,7 @@ async function createTask(
     promptTruncated: truncated,
     creationMode,
     model: payload.model,
+    aspectRatio,
     resolution: useEditModel ? undefined : resolution,
   }))
   console.log(`[${payload.model}] prompt:`, prompt)
@@ -1787,6 +1804,7 @@ Deno.serve(async (req: Request) => {
       interaction?: string
       celebrityId?: string
       userHeightCm?: number
+      aspectRatio?: string
       sessionId?: string
       analysisId?: string
       userId?: string
@@ -1872,6 +1890,7 @@ Deno.serve(async (req: Request) => {
       )
     }
     const userHeightCm = isValidUserHeightCm(body.userHeightCm) ? body.userHeightCm : undefined
+    const aspectRatio = normalizePhotoAspectRatio(body.aspectRatio)
 
     const generationContext: PhotoGenerationContext = {
       celebrityName,
@@ -1896,6 +1915,7 @@ Deno.serve(async (req: Request) => {
       interaction: creationMode === 'photo_edit' ? 'selfie' : (interaction?.trim() || undefined),
       hasCelebrityReferenceImage: Boolean(celebrityImageBase64),
       userHeightCm,
+      aspectRatio,
     }
 
     // Bypass crédits : uniquement JWT + rôle DB super_admin.
