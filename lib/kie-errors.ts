@@ -25,6 +25,14 @@ export function formatKieError(message: string, code?: string): string {
     return 'Le service de génération IA est temporairement indisponible (crédits fournisseur épuisés). Réessaie un peu plus tard.'
   }
 
+  if (code === 'GENERATION_SAFETY_BLOCKED') {
+    return 'Cette génération n\'a pas pu être réalisée automatiquement. Essaie une autre photo ou une autre mise en scène.'
+  }
+
+  if (code === 'GENERATION_FAILED') {
+    return 'La génération a échoué. Réessaie avec une autre photo ou une autre mise en scène.'
+  }
+
   if (code === 'GENERATION_JOB_EXPIRED') {
     return 'La génération a expiré. Réessaie — ton crédit a été remboursé si besoin.'
   }

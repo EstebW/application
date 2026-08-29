@@ -177,8 +177,11 @@ interface PhotoGenerationContext {
 }
 
 /** Doit rester aligné sur lib/interactions.ts. */
+const SELFIE_POV_INTERACTION_PROMPT =
+  'SELFIE POV / FRONT CAMERA RESULT ONLY: generate the image as if it was captured directly by the user\'s smartphone front camera at arm\' length. This is the resulting selfie image, not a third-person photo of someone taking a selfie. Never show the phone device in the frame. Never show the user holding the phone. Both people should be close to the camera, looking toward the phone lens, with natural selfie perspective, slightly imperfect framing, and authentic casual smartphone composition.'
+
 const INTERACTION_PROMPTS: Record<string, string> = {
-  selfie: 'both looking at the phone camera as if taking a selfie together, heads close',
+  selfie: SELFIE_POV_INTERACTION_PROMPT,
   side_by_side: 'standing casually side by side, close enough to look like they are together',
   arm_shoulder: 'the celebrity resting one arm loosely over the user\'s shoulder in a friendly way',
   seated: 'both seated next to each other, relaxed posture',
@@ -202,7 +205,7 @@ interface PromptSection {
 }
 
 const PROTECTED_SECTION_HEADER =
-  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|VERROUILLAGE PHOTO SOURCE)/i
+  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|SELFIE POV|VERROUILLAGE PHOTO SOURCE)/i
 const SECONDARY_SECTION_HEADER =
   /^(SCENE REQUIREMENTS|FINAL MANDATORY CHECK|SUBJECTS:)/i
 const OTHER_SECTION_HEADER =
@@ -904,6 +907,34 @@ function boundPromptField(text: string, maxChars: number): string {
   return cleaned.length <= maxChars ? cleaned : cleaned.slice(0, maxChars)
 }
 
+/** Aligné sur lib/scene-suggestions.ts — bloc POV selfie. */
+function selfiePovBlock(
+  interaction: string | undefined,
+  creationMode: CelebrityCreationMode = 'full_generation',
+): string[] {
+  if (interaction !== 'selfie') return []
+
+  if (creationMode === 'photo_edit') {
+    return [
+      'SELFIE POV LOCK (photo_edit — preserve source framing):',
+      '- Final image = the resulting selfie POV, NOT a third-person view of someone taking a selfie.',
+      '- Never show the phone device. Never show the user holding a phone.',
+      '- If image_input[0] is already a front-camera selfie POV, keep that exact perspective — do not reframe.',
+      '- If the source is NOT already a selfie POV, do NOT force an impossible reframing: keep natural proximity and both people looking toward the camera lens, without inventing a visible phone.',
+      '- Close faces, natural casual composition, authentic smartphone feel.',
+    ]
+  }
+
+  return [
+    'SELFIE POV / FRONT CAMERA RESULT ONLY:',
+    '- Generate as if captured directly by the user\'s smartphone front camera at arm\' length.',
+    '- This is the resulting selfie image, NOT a third-person photo of someone taking a selfie.',
+    '- Never show the phone device in the frame. Never show the user holding the phone.',
+    '- Both people close to the camera, looking toward the phone lens.',
+    '- Natural selfie perspective, slightly imperfect framing, authentic casual smartphone composition.',
+  ]
+}
+
 /** « Créer une nouvelle photo » — le modèle recompose la scène. */
 function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   const {
@@ -941,6 +972,7 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   const heightSection = heightConsistencyBlock(ctx).join('\n')
   const closingBlocks = [
     heightSection,
+    ...selfiePovBlock(interaction, ctx.creationMode ?? 'full_generation'),
     ...photorealismBlock(starName),
     ...naturalMomentBlock(),
     ...sceneAdaptiveWardrobeBlock(starName),
@@ -1225,6 +1257,7 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     celebrityStyleDescription,
     customPrompt,
     hasCelebrityReferenceImage,
+    interaction,
   } = ctx
   const starName = sanitizeSceneText(celebrityName) || 'la célébrité'
   const domain = sanitizeSceneText(celebrityDomain)
@@ -1262,6 +1295,8 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     'À éviter absolument : fond modifié, tête ou visage de l\'utilisateur remplacé/retouché, peau plastique, effet beauté, visage déformé, arrière-plan reconstruit, pose trop parfaite, rendu pro, collage visible.',
     ...(userHint ? ['', `Note : ${userHint}`] : []),
     ...(dual ? [] : ['', `Célébrité : ${starDescription}.`]),
+    '',
+    ...selfiePovBlock(interaction ?? 'selfie', 'photo_edit'),
     '',
     `Objectif : une vraie photo selfie — la personne et le fond de image_input[0] intacts à 100 %, ${starName} ajoutée naturellement à côté.`,
   ].filter((line) => line !== '').join('\n')
@@ -1453,12 +1488,189 @@ function logGenerateTiming(phase: string, startMs: number, extra?: Record<string
   console.log('[generate] timing', JSON.stringify({ phase, ms: Date.now() - startMs, ...extra }))
 }
 
+/** Refus Google / filtre sécurité — distinct des erreurs techniques KIE. */
+class GenerationSafetyBlockedError extends Error {
+  readonly failMsg: string
+
+  constructor(failMsg: string) {
+    super(failMsg)
+    this.name = 'GenerationSafetyBlockedError'
+    this.failMsg = failMsg
+  }
+}
+
+const GOOGLE_SAFETY_MARKERS = [
+  'prohibited use',
+  'filtered out',
+  'violated google',
+  'blocked by google',
+  'generative ai prohibited use policy',
+  'safety filter',
+] as const
+
+function hasGoogleSafetyMarker(lower: string): boolean {
+  if (GOOGLE_SAFETY_MARKERS.some((m) => lower.includes(m))) return true
+  if (lower.includes('safety') && lower.includes('google')) return true
+  return false
+}
+
+/** Strict : « No images found » seul ≠ safety ; exige un marqueur Google explicite. */
+function isGoogleSafetyBlockedMessage(msg: string): boolean {
+  const lower = msg.toLowerCase()
+  if (hasGoogleSafetyMarker(lower)) return true
+  if (lower.includes('no images found in ai response') && hasGoogleSafetyMarker(lower)) {
+    return true
+  }
+  return false
+}
+
+function logSafetyEvent(
+  event: 'safety_blocked' | 'safety_retry_started' | 'safety_retry_success' | 'safety_retry_blocked',
+  fields: Record<string, unknown>,
+): void {
+  console.log(`[generate] ${event}`, JSON.stringify(fields))
+}
+
+type StoredRetryContext = Pick<
+  PhotoGenerationContext,
+  | 'celebrityName'
+  | 'celebrityDomain'
+  | 'mode'
+  | 'creationMode'
+  | 'sceneSource'
+  | 'scene'
+  | 'interaction'
+  | 'hasCelebrityReferenceImage'
+  | 'celebrityPlacementInstruction'
+  | 'userHeightCm'
+  | 'celebrityHeightCm'
+  | 'celebrityTargetApparentHeightRatio'
+  | 'aspectRatio'
+>
+
+function serializeRetryContext(ctx: PhotoGenerationContext): StoredRetryContext {
+  return {
+    celebrityName: ctx.celebrityName,
+    celebrityDomain: ctx.celebrityDomain,
+    mode: ctx.mode,
+    creationMode: ctx.creationMode,
+    sceneSource: ctx.sceneSource,
+    scene: ctx.scene,
+    interaction: ctx.interaction,
+    hasCelebrityReferenceImage: ctx.hasCelebrityReferenceImage,
+    celebrityPlacementInstruction: ctx.celebrityPlacementInstruction,
+    userHeightCm: ctx.userHeightCm,
+    celebrityHeightCm: ctx.celebrityHeightCm,
+    celebrityTargetApparentHeightRatio: ctx.celebrityTargetApparentHeightRatio,
+    aspectRatio: ctx.aspectRatio,
+  }
+}
+
+function isSafetyRetryEligible(
+  ctx: StoredRetryContext,
+  hasCustomPrompt: boolean,
+): boolean {
+  if (hasCustomPrompt) return false
+  return (
+    ctx.mode === 'presets' ||
+    ctx.creationMode === 'photo_edit' ||
+    ctx.sceneSource === 'user_photo' ||
+    Boolean(getInteractionPrompt(ctx.interaction))
+  )
+}
+
+function buildSafetyRetrySceneLines(ctx: StoredRetryContext): string[] {
+  if (ctx.creationMode === 'photo_edit') {
+    return [
+      'Mode: preserve the source photo structure; add the celebrity beside the user only.',
+      'Do not reframe the source image or invent a visible phone device.',
+    ]
+  }
+  if (ctx.sceneSource === 'user_photo') {
+    return ['Scene: keep the same place, lighting and atmosphere as the user reference photo.']
+  }
+  if (ctx.mode === 'presets' && ctx.scene) {
+    return [
+      `Location: ${sanitizeSceneText(ctx.scene.location)}`,
+      `Outfits: ${sanitizeSceneText(ctx.scene.outfits)}`,
+      `Pose/framing: ${sanitizeSceneText(ctx.scene.position)}`,
+    ]
+  }
+  return ['Scene: follow the same StarFusion preset request.']
+}
+
+function buildSafetyRetryHeightLines(ctx: StoredRetryContext): string[] {
+  const lines: string[] = []
+  if (ctx.userHeightCm) lines.push(`User height: ${ctx.userHeightCm} cm`)
+  if (ctx.celebrityHeightCm) lines.push(`Celebrity height: ${ctx.celebrityHeightCm} cm`)
+  if (ctx.celebrityTargetApparentHeightRatio != null) {
+    lines.push(`Target apparent height ratio: ${ctx.celebrityTargetApparentHeightRatio}`)
+  }
+  return lines
+}
+
+function buildSafetyRetryInteractionLine(ctx: StoredRetryContext): string {
+  if (ctx.interaction === 'selfie') {
+    return SELFIE_POV_INTERACTION_PROMPT
+  }
+  const resolved = getInteractionPrompt(ctx.interaction)
+  return resolved ?? 'Natural friendly presence beside each other.'
+}
+
+/** Prompt court pour un retry preset innocent — sans vocabulaire sensible inutile. */
+function buildSafetyRetryPrompt(ctx: StoredRetryContext): string {
+  const starName = sanitizeSceneText(ctx.celebrityName) || 'the celebrity'
+  const lines = [
+    'SAFE RETRY — ORDINARY EVERYDAY PHOTO.',
+    '',
+    'Create the same harmless, family-friendly everyday photo requested by the StarFusion preset.',
+    'Preserve both identities from the reference images.',
+    'Preserve the same scene, interaction, perspective and requested placement.',
+    'Natural casual clothing, realistic proportions, ordinary friendly body language.',
+    'Authentic amateur smartphone appearance with natural lighting, skin texture, grain and imperfections.',
+    'Do not change the requested scenario or invent a different context.',
+    '',
+    `Celebrity: ${starName}.`,
+    `Interaction: ${buildSafetyRetryInteractionLine(ctx)}`,
+    ...buildSafetyRetrySceneLines(ctx),
+    ...buildSafetyRetryHeightLines(ctx),
+  ]
+  if (ctx.celebrityPlacementInstruction) {
+    lines.push(`Placement: ${sanitizeSceneText(ctx.celebrityPlacementInstruction)}`)
+  }
+  if (ctx.hasCelebrityReferenceImage) {
+    lines.push('Use the second reference image only for celebrity face identity.')
+  }
+  const prompt = lines.filter(Boolean).join('\n')
+  return prompt.length <= 1800 ? prompt : prompt.slice(0, 1800)
+}
+
+async function clearJobRetryPayload(
+  db: ReturnType<typeof createClient>,
+  jobId: string,
+): Promise<void> {
+  await db.from('generation_jobs').update({
+    kie_image_urls: null,
+    retry_context: null,
+    updated_at: new Date().toISOString(),
+  }).eq('id', jobId)
+}
+
+const GENERATION_SAFETY_BLOCKED_RESPONSE = {
+  error: 'Cette génération n\'a pas pu être réalisée automatiquement. Essaie une autre photo ou une autre mise en scène.',
+  code: 'GENERATION_SAFETY_BLOCKED',
+} as const
+
 async function createTask(
   imageUrls: string[],
   ctx: PhotoGenerationContext,
-  apiKey: string
+  apiKey: string,
+  options?: { promptOverride?: string; safetyRetry?: boolean },
 ): Promise<string> {
-  const { prompt, truncated } = buildPhotoPrompt(ctx)
+  const promptBundle = options?.promptOverride
+    ? { prompt: options.promptOverride, truncated: false }
+    : buildPhotoPrompt(ctx)
+  const { prompt, truncated } = promptBundle
   const creationMode = ctx.creationMode ?? 'full_generation'
   const useEditModel =
     creationMode === 'photo_edit' && resolvePhotoEditModel() === 'google/nano-banana-edit'
@@ -1492,6 +1704,7 @@ async function createTask(
     creationMode,
     model: payload.model,
     aspectRatio,
+    safetyRetry: options?.safetyRetry ?? false,
     resolution: useEditModel ? undefined : resolution,
   }))
   console.log(`[${payload.model}] prompt:`, prompt)
@@ -1531,9 +1744,14 @@ interface GenerationJobRow {
   analysis_id: string | null
   status: 'pending' | 'success' | 'failed'
   fail_message: string | null
+  fail_code: string | null
   result_url: string | null
   generation_id: string | null
   credit_consumed: boolean
+  kie_image_urls: string[] | null
+  retry_context: StoredRetryContext | null
+  has_custom_prompt: boolean
+  safety_retry_used: boolean
   created_at: string
 }
 
@@ -1640,6 +1858,105 @@ async function insertGenerationRecord(
   return inserted.data?.id
 }
 
+async function finalizeSafetyBlockedJob(
+  db: ReturnType<typeof createClient>,
+  job: GenerationJobRow,
+): Promise<Response> {
+  if (job.credit_consumed) {
+    await refundGenerationCredit(db, job.session_id)
+  }
+  await db.from('generation_jobs').update({
+    status: 'failed',
+    fail_message: GENERATION_SAFETY_BLOCKED_RESPONSE.code,
+    fail_code: GENERATION_SAFETY_BLOCKED_RESPONSE.code,
+    updated_at: new Date().toISOString(),
+  }).eq('id', job.id)
+  await clearJobRetryPayload(db, job.id)
+  return new Response(
+    JSON.stringify(GENERATION_SAFETY_BLOCKED_RESPONSE),
+    { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } },
+  )
+}
+
+async function handleSafetyBlockedFailure(
+  job: GenerationJobRow,
+  _failMsg: string,
+  db: ReturnType<typeof createClient>,
+  kieKey: string,
+): Promise<Response> {
+  const creationMode = (job.creation_mode as CelebrityCreationMode) ?? 'full_generation'
+  const model = creationMode === 'photo_edit' ? resolvePhotoEditModel() : 'nano-banana-2'
+  const retryAttempt = job.safety_retry_used ? 2 : 1
+
+  logSafetyEvent('safety_blocked', {
+    creationMode,
+    model,
+    celebrityName: job.celebrity_name,
+    hasCustomPrompt: job.has_custom_prompt,
+    retryAttempt,
+  })
+
+  const retryCtx = job.retry_context
+  const imageUrls = job.kie_image_urls
+  const canRetry = !job.safety_retry_used
+    && retryCtx
+    && Array.isArray(imageUrls)
+    && imageUrls.length > 0
+    && isSafetyRetryEligible(retryCtx, job.has_custom_prompt)
+
+  if (canRetry) {
+    logSafetyEvent('safety_retry_started', {
+      creationMode,
+      model,
+      celebrityName: job.celebrity_name,
+      hasCustomPrompt: job.has_custom_prompt,
+      retryAttempt: 1,
+    })
+
+    const ctxForTask: PhotoGenerationContext = {
+      celebrityName: retryCtx.celebrityName,
+      celebrityDomain: retryCtx.celebrityDomain ?? '',
+      mode: retryCtx.mode,
+      creationMode: retryCtx.creationMode,
+      sceneSource: retryCtx.sceneSource,
+      scene: retryCtx.scene,
+      interaction: retryCtx.interaction,
+      hasCelebrityReferenceImage: retryCtx.hasCelebrityReferenceImage,
+      celebrityPlacementInstruction: retryCtx.celebrityPlacementInstruction,
+      userHeightCm: retryCtx.userHeightCm,
+      celebrityHeightCm: retryCtx.celebrityHeightCm,
+      celebrityTargetApparentHeightRatio: retryCtx.celebrityTargetApparentHeightRatio,
+      aspectRatio: retryCtx.aspectRatio,
+    }
+
+    const newTaskId = await createTask(imageUrls, ctxForTask, kieKey, {
+      promptOverride: buildSafetyRetryPrompt(retryCtx),
+      safetyRetry: true,
+    })
+
+    await db.from('generation_jobs').update({
+      kie_task_id: newTaskId,
+      safety_retry_used: true,
+      updated_at: new Date().toISOString(),
+    }).eq('id', job.id)
+
+    return new Response(
+      JSON.stringify({ status: 'pending', pollJobId: job.id }),
+      { headers: { ...CORS, 'Content-Type': 'application/json' } },
+    )
+  }
+
+  logSafetyEvent('safety_retry_blocked', {
+    creationMode,
+    model,
+    celebrityName: job.celebrity_name,
+    hasCustomPrompt: job.has_custom_prompt,
+    retryAttempt,
+  })
+
+  return finalizeSafetyBlockedJob(db, job)
+}
+
 async function handlePollJob(
   pollJobId: string,
   authUser: User,
@@ -1674,8 +1991,10 @@ async function handlePollJob(
       await db.from('generation_jobs').update({
         status: 'failed',
         fail_message: 'expired',
+        fail_code: 'GENERATION_JOB_EXPIRED',
         updated_at: new Date().toISOString(),
       }).eq('id', job.id)
+      await clearJobRetryPayload(db, job.id)
     }
     return new Response(
       JSON.stringify({
@@ -1710,12 +2029,18 @@ async function handlePollJob(
   }
 
   if (job.status === 'failed') {
+    if (job.fail_code === GENERATION_SAFETY_BLOCKED_RESPONSE.code) {
+      return new Response(
+        JSON.stringify(GENERATION_SAFETY_BLOCKED_RESPONSE),
+        { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } },
+      )
+    }
     return new Response(
       JSON.stringify({
-        error: job.fail_message ?? 'Nano Banana 2 échoué',
-        code: 'GENERATION_FAILED',
+        error: 'La génération a échoué. Réessaie avec une autre photo ou une autre mise en scène.',
+        code: job.fail_code ?? 'GENERATION_FAILED',
       }),
-      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } },
     )
   }
 
@@ -1728,19 +2053,39 @@ async function handlePollJob(
   }
 
   if (snapshot.state === 'fail') {
-    const failMessage = `Nano Banana 2 échoué: ${snapshot.failMsg ?? 'inconnu'}`
+    const failMsg = snapshot.failMsg ?? 'inconnu'
+    if (isGoogleSafetyBlockedMessage(failMsg)) {
+      return await handleSafetyBlockedFailure(job, failMsg, db, kieKey)
+    }
+
     if (job.credit_consumed) {
       await refundGenerationCredit(db, job.session_id)
     }
     await db.from('generation_jobs').update({
       status: 'failed',
-      fail_message: failMessage,
+      fail_message: 'generation_technical_failure',
+      fail_code: 'GENERATION_FAILED',
       updated_at: new Date().toISOString(),
     }).eq('id', job.id)
+    await clearJobRetryPayload(db, job.id)
     return new Response(
-      JSON.stringify({ error: failMessage }),
-      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      JSON.stringify({
+        error: 'La génération a échoué. Réessaie avec une autre photo ou une autre mise en scène.',
+        code: 'GENERATION_FAILED',
+      }),
+      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } },
     )
+  }
+
+  if (job.safety_retry_used) {
+    const creationMode = (job.creation_mode as CelebrityCreationMode) ?? 'full_generation'
+    logSafetyEvent('safety_retry_success', {
+      creationMode,
+      model: creationMode === 'photo_edit' ? resolvePhotoEditModel() : 'nano-banana-2',
+      celebrityName: job.celebrity_name,
+      hasCustomPrompt: job.has_custom_prompt,
+      retryAttempt: 2,
+    })
   }
 
   const generatedBase64 = await downloadImageAsDataUrl(snapshot.resultUrl!)
@@ -1759,6 +2104,7 @@ async function handlePollJob(
     generation_id: generationId ?? null,
     updated_at: new Date().toISOString(),
   }).eq('id', job.id)
+  await clearJobRetryPayload(db, job.id)
 
   return new Response(
     JSON.stringify({
@@ -2039,6 +2385,11 @@ Deno.serve(async (req: Request) => {
       const kieTaskId = await createTask(imageUrls, generationContext, kieKey)
       logGenerateTiming('kie_create_task', tCreate, { creationMode })
 
+      const hasCustomPrompt = Boolean(
+        (mode === 'custom' && customPrompt?.trim()) ||
+        (creationMode === 'photo_edit' && customPrompt?.trim())
+      )
+
       const { data: jobRow, error: jobInsertErr } = await db
         .from('generation_jobs')
         .insert({
@@ -2051,6 +2402,10 @@ Deno.serve(async (req: Request) => {
           analysis_id: analysisId?.trim() ? analysisId.trim() : null,
           status: 'pending',
           credit_consumed: creditReserved,
+          kie_image_urls: imageUrls,
+          retry_context: serializeRetryContext(generationContext),
+          has_custom_prompt: hasCustomPrompt,
+          safety_retry_used: false,
         })
         .select('id')
         .single()

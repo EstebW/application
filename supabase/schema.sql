@@ -119,6 +119,11 @@ create table if not exists generation_jobs (
   result_url      text,
   generation_id   uuid references generations(id) on delete set null,
   credit_consumed boolean not null default false,
+  kie_image_urls       jsonb,
+  retry_context        jsonb,
+  has_custom_prompt    boolean not null default false,
+  safety_retry_used    boolean not null default false,
+  fail_code            text,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );

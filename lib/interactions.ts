@@ -5,11 +5,15 @@ import type { InteractionOption } from './types'
  * Toujours facultatives : en mode photo_edit elles ne doivent jamais justifier
  * de déformer la photo d'origine.
  */
+/** Formulation POV explicite — évite la lecture « photo de quelqu'un en train de prendre un selfie ». */
+export const SELFIE_POV_INTERACTION_PROMPT =
+  'SELFIE POV / FRONT CAMERA RESULT ONLY: generate the image as if it was captured directly by the user\'s smartphone front camera at arm\' length. This is the resulting selfie image, not a third-person photo of someone taking a selfie. Never show the phone device in the frame. Never show the user holding the phone. Both people should be close to the camera, looking toward the phone lens, with natural selfie perspective, slightly imperfect framing, and authentic casual smartphone composition.'
+
 export const INTERACTION_OPTIONS: InteractionOption[] = [
   {
     id: 'selfie',
     label: 'Selfie',
-    prompt: 'both looking at the phone camera as if taking a selfie together, heads close',
+    prompt: SELFIE_POV_INTERACTION_PROMPT,
   },
   {
     id: 'side_by_side',

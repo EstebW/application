@@ -11,6 +11,7 @@ import {
   buildPhotoPrompt,
   clampKiePrompt,
   KIE_PROMPT_MAX_CHARS,
+  selfiePovBlock,
 } from '../lib/scene-suggestions.ts'
 import type { PhotoGenerationContext } from '../lib/types.ts'
 
@@ -68,6 +69,28 @@ describe('longueur des prompts KIE', () => {
     assert.match(prompt, /182/)
     assert.doesNotMatch(prompt, /FACIAL IDENTITY LOCK/)
     assert.doesNotMatch(prompt, /NATURAL MOMENT LOCK/)
+  })
+
+  it('full_generation selfie injecte le bloc POV caméra frontale', () => {
+    const prompt = buildPhotoPrompt({ ...worstFullGen, interaction: 'selfie' })
+    assert.match(prompt, /SELFIE POV \/ FRONT CAMERA RESULT ONLY/)
+    assert.match(prompt, /NOT a third-person photo of someone taking a selfie/)
+    assert.match(prompt, /Never show the phone device/)
+    assert.match(prompt, /INTERACTION between the two people: SELFIE POV \/ FRONT CAMERA RESULT ONLY/)
+    assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS)
+  })
+
+  it('photo_edit selfie injecte le bloc POV sans forcer le recadrage', () => {
+    const prompt = buildPhotoPrompt({ ...worstPhotoEdit, interaction: 'selfie' })
+    assert.match(prompt, /SELFIE POV LOCK \(photo_edit — preserve source framing\)/)
+    assert.match(prompt, /do NOT force an impossible reframing/)
+    assert.match(prompt, /Never show the user holding a phone/)
+    assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS)
+  })
+
+  it('selfiePovBlock est absent pour les autres interactions', () => {
+    assert.deepEqual(selfiePovBlock('arm_shoulder'), [])
+    assert.deepEqual(selfiePovBlock(undefined), [])
   })
 
   it('full_generation garde le prompt qualité complet', () => {

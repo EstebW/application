@@ -1,6 +1,6 @@
 import { getInteractionPrompt } from './interactions.ts'
 import { heightConsistencyBlock } from './height-prompt.ts'
-import type { PhotoGenerationContext, PhotoScene } from './types.ts'
+import type { CelebrityCreationMode, PhotoGenerationContext, PhotoScene } from './types.ts'
 
 export { heightConsistencyBlock }
 
@@ -158,7 +158,7 @@ interface PromptSection {
 }
 
 const PROTECTED_SECTION_HEADER =
-  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|VERROUILLAGE PHOTO SOURCE)/i
+  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|SELFIE POV|VERROUILLAGE PHOTO SOURCE)/i
 const SECONDARY_SECTION_HEADER =
   /^(SCENE REQUIREMENTS|FINAL MANDATORY CHECK|SUBJECTS:)/i
 const OTHER_SECTION_HEADER =
@@ -346,6 +346,38 @@ function boundPromptField(text: string, maxChars: number): string {
 }
 
 /**
+ * Bloc POV selfie — injecté quand interaction === 'selfie'.
+ * full_generation : vraie logique caméra frontale.
+ * photo_edit : préserve le cadrage source, sans inventer de téléphone visible.
+ */
+export function selfiePovBlock(
+  interaction: string | undefined,
+  creationMode: CelebrityCreationMode = 'full_generation',
+): string[] {
+  if (interaction !== 'selfie') return []
+
+  if (creationMode === 'photo_edit') {
+    return [
+      'SELFIE POV LOCK (photo_edit — preserve source framing):',
+      '- Final image = the resulting selfie POV, NOT a third-person view of someone taking a selfie.',
+      '- Never show the phone device. Never show the user holding a phone.',
+      '- If image_input[0] is already a front-camera selfie POV, keep that exact perspective — do not reframe.',
+      '- If the source is NOT already a selfie POV, do NOT force an impossible reframing: keep natural proximity and both people looking toward the camera lens, without inventing a visible phone.',
+      '- Close faces, natural casual composition, authentic smartphone feel.',
+    ]
+  }
+
+  return [
+    'SELFIE POV / FRONT CAMERA RESULT ONLY:',
+    '- Generate as if captured directly by the user\'s smartphone front camera at arm\' length.',
+    '- This is the resulting selfie image, NOT a third-person photo of someone taking a selfie.',
+    '- Never show the phone device in the frame. Never show the user holding the phone.',
+    '- Both people close to the camera, looking toward the phone lens.',
+    '- Natural selfie perspective, slightly imperfect framing, authentic casual smartphone composition.',
+  ]
+}
+
+/**
  * Prompt « Créer une nouvelle photo » — scènes guidées ou prompt libre utilisateur.
  * Le modèle recompose la scène en gardant l'identité de l'utilisateur.
  */
@@ -385,6 +417,7 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   const heightSection = heightConsistencyBlock(ctx).join('\n')
   const closingBlocks = [
     heightSection,
+    ...selfiePovBlock(interaction, ctx.creationMode ?? 'full_generation'),
     ...photorealismBlock(starName),
     ...naturalMomentBlock(),
     ...sceneAdaptiveWardrobeBlock(starName),
@@ -478,6 +511,7 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     celebrityStyleDescription,
     customPrompt,
     hasCelebrityReferenceImage,
+    interaction,
   } = ctx
   const starName = sanitizeSceneText(celebrityName) || 'la célébrité'
   const domain = sanitizeSceneText(celebrityDomain)
@@ -515,6 +549,8 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     'À éviter absolument : fond modifié, tête ou visage de l\'utilisateur remplacé/retouché, peau plastique, effet beauté, visage déformé, arrière-plan reconstruit, pose trop parfaite, rendu pro, collage visible.',
     ...(userHint ? ['', `Note : ${userHint}`] : []),
     ...(dual ? [] : ['', `Célébrité : ${starDescription}.`]),
+    '',
+    ...selfiePovBlock(interaction ?? 'selfie', 'photo_edit'),
     '',
     `Objectif : une vraie photo selfie — la personne et le fond de image_input[0] intacts à 100 %, ${starName} ajoutée naturellement à côté.`,
   ].filter((line) => line !== '').join('\n')

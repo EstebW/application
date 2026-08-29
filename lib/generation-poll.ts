@@ -68,7 +68,7 @@ export async function runGenerationWithPolling(
       }
       if (poll.error) throw new Error(poll.error)
     } catch (err) {
-      if (err instanceof FunctionCallError && err.status === 404) {
+      if (err instanceof FunctionCallError) {
         throw new Error(formatKieError(err.message, err.code))
       }
       throw err
