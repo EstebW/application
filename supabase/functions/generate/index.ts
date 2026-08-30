@@ -205,7 +205,7 @@ interface PromptSection {
 }
 
 const PROTECTED_SECTION_HEADER =
-  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|SELFIE POV|VERROUILLAGE PHOTO SOURCE)/i
+  /^(STARFUSION — HARMLESS FICTION|ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|SELFIE POV|VERROUILLAGE PHOTO SOURCE)/i
 const SECONDARY_SECTION_HEADER =
   /^(SCENE REQUIREMENTS|FINAL MANDATORY CHECK|SUBJECTS:)/i
 const OTHER_SECTION_HEADER =
@@ -935,6 +935,49 @@ function selfiePovBlock(
   ]
 }
 
+/** Version courte pour photo_edit (prompt déjà long). */
+function harmlessFictionPreambleCompactBlock(): string[] {
+  return [
+    'STARFUSION — harmless fictional fan-photo (PG-13, fully clothed adults, comedy OK, not real news).',
+  ]
+}
+function harmlessFictionPreambleBlock(): string[] {
+  return [
+    'STARFUSION — HARMLESS FICTION / FAN ENTERTAINMENT:',
+    '- Fictional comedy fan-photo for entertainment only — not a real event, not news, not fraud.',
+    '- Two fully clothed adults in an ordinary or lightly absurd humorous setting (PG-13).',
+    '- Silly, awkward, or edgy-comedy scenarios are OK if playful and non-explicit.',
+    '- Absurd everyday places (toilets, McDrive, karaoke, laundromat, escape room) = comedy, fully clothed.',
+    '- No nudity, explicit content, violence, hate, illegal activity, or minors.',
+    '- Time-of-day words (soir, 22h, night, evening) = natural ambient lighting in everyday places.',
+    '- Celebrity likeness is a fictional composite for fun — preserve reference faces only.',
+  ]
+}
+
+const REASONABLE_CUSTOM_MAX_CHARS = 600
+
+const PROHIBITED_PROMPT_PATTERNS = [
+  /\b(nu|nue|nus|nues|naked|nude|nudité|nudite|nudity)\b/i,
+  /\b(porn|porno|xxx|hentai|onlyfans)\b/i,
+  /\b(fellation|pénis|penis|vagin|orgasm|intercourse|blowjob|handjob)\b/i,
+  /\b(gore|décapit|decapit|dismember|massacre|torture)\b/i,
+  /\b(pédoph|pedoph|child porn|cp\b)/i,
+  /\b(nazi|racist slur|white power|heil hitler)\b/i,
+  /\b(suicide bomb|terror attack|school shooting)\b/i,
+] as const
+
+function isProhibitedPromptContent(text: string): boolean {
+  return PROHIBITED_PROMPT_PATTERNS.some((pattern) => pattern.test(text))
+}
+
+function isReasonableCustomPrompt(text: string | undefined): boolean {
+  if (!text?.trim()) return false
+  const t = text.trim()
+  if (t.length > REASONABLE_CUSTOM_MAX_CHARS) return false
+  if (isProhibitedPromptContent(t)) return false
+  return true
+}
+
 /** « Créer une nouvelle photo » — le modèle recompose la scène. */
 function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   const {
@@ -979,6 +1022,8 @@ function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   ].filter(Boolean)
 
   const wrap = (sceneBlock: string[]) => [
+    ...harmlessFictionPreambleBlock(),
+    '',
     ...facePreservationBlock(dual),
     celebrityLine,
     styleLine,
@@ -1269,6 +1314,8 @@ function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   ).slice(0, 120) || starName
 
   return [
+    ...harmlessFictionPreambleCompactBlock(),
+    '',
     'Utilise image_input[0] comme image de base — c\'est la vérité absolue de la photo.',
     '',
     `Crée une photo ultra réaliste de cette scène, comme si la personne sur la photo avait croisé ${starName} et pris un selfie spontané avec elle/lui.`,
@@ -1539,6 +1586,7 @@ type StoredRetryContext = Pick<
   | 'creationMode'
   | 'sceneSource'
   | 'scene'
+  | 'customPrompt'
   | 'interaction'
   | 'hasCelebrityReferenceImage'
   | 'celebrityPlacementInstruction'
@@ -1556,6 +1604,7 @@ function serializeRetryContext(ctx: PhotoGenerationContext): StoredRetryContext 
     creationMode: ctx.creationMode,
     sceneSource: ctx.sceneSource,
     scene: ctx.scene,
+    customPrompt: ctx.customPrompt,
     interaction: ctx.interaction,
     hasCelebrityReferenceImage: ctx.hasCelebrityReferenceImage,
     celebrityPlacementInstruction: ctx.celebrityPlacementInstruction,
@@ -1570,7 +1619,10 @@ function isSafetyRetryEligible(
   ctx: StoredRetryContext,
   hasCustomPrompt: boolean,
 ): boolean {
-  if (hasCustomPrompt) return false
+  if (hasCustomPrompt) {
+    if (!isReasonableCustomPrompt(ctx.customPrompt)) return false
+    return ctx.mode === 'custom' || ctx.creationMode === 'photo_edit'
+  }
   return (
     ctx.mode === 'presets' ||
     ctx.creationMode === 'photo_edit' ||
@@ -1588,6 +1640,9 @@ function buildSafetyRetrySceneLines(ctx: StoredRetryContext): string[] {
   }
   if (ctx.sceneSource === 'user_photo') {
     return ['Scene: keep the same place, lighting and atmosphere as the user reference photo.']
+  }
+  if (ctx.mode === 'custom' && ctx.customPrompt) {
+    return [`User scene request: ${sanitizeSceneText(ctx.customPrompt)}`]
   }
   if (ctx.mode === 'presets' && ctx.scene) {
     return [
@@ -1620,10 +1675,16 @@ function buildSafetyRetryInteractionLine(ctx: StoredRetryContext): string {
 /** Prompt court pour un retry preset innocent — sans vocabulaire sensible inutile. */
 function buildSafetyRetryPrompt(ctx: StoredRetryContext): string {
   const starName = sanitizeSceneText(ctx.celebrityName) || 'the celebrity'
+  const requestLabel = ctx.mode === 'custom'
+    ? 'the StarFusion user request'
+    : 'the StarFusion preset'
   const lines = [
+    ...harmlessFictionPreambleBlock(),
+    '',
     'SAFE RETRY — ORDINARY EVERYDAY PHOTO.',
     '',
-    'Create the same harmless, family-friendly everyday photo requested by the StarFusion preset.',
+    `Create the same harmless, family-friendly everyday photo requested by ${requestLabel}.`,
+    'Keep the same humorous or absurd spirit if the request is playful — stay PG-13 and fully clothed.',
     'Preserve both identities from the reference images.',
     'Preserve the same scene, interaction, perspective and requested placement.',
     'Natural casual clothing, realistic proportions, ordinary friendly body language.',
@@ -1642,7 +1703,8 @@ function buildSafetyRetryPrompt(ctx: StoredRetryContext): string {
     lines.push('Use the second reference image only for celebrity face identity.')
   }
   const prompt = lines.filter(Boolean).join('\n')
-  return prompt.length <= 1800 ? prompt : prompt.slice(0, 1800)
+  const RETRY_PROMPT_MAX_CHARS = 2400
+  return prompt.length <= RETRY_PROMPT_MAX_CHARS ? prompt : prompt.slice(0, RETRY_PROMPT_MAX_CHARS)
 }
 
 async function clearJobRetryPayload(

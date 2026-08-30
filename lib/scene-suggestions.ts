@@ -1,4 +1,5 @@
 import { getInteractionPrompt } from './interactions.ts'
+import { harmlessFictionPreambleBlock, harmlessFictionPreambleCompactBlock } from './generation-safety.ts'
 import { heightConsistencyBlock } from './height-prompt.ts'
 import type { CelebrityCreationMode, PhotoGenerationContext, PhotoScene } from './types.ts'
 
@@ -158,7 +159,7 @@ interface PromptSection {
 }
 
 const PROTECTED_SECTION_HEADER =
-  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|SELFIE POV|VERROUILLAGE PHOTO SOURCE)/i
+  /^(STARFUSION — HARMLESS FICTION|ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|SELFIE POV|VERROUILLAGE PHOTO SOURCE)/i
 const SECONDARY_SECTION_HEADER =
   /^(SCENE REQUIREMENTS|FINAL MANDATORY CHECK|SUBJECTS:)/i
 const OTHER_SECTION_HEADER =
@@ -424,6 +425,8 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   ].filter(Boolean)
 
   const wrap = (sceneBlock: string[]) => [
+    ...harmlessFictionPreambleBlock(),
+    '',
     ...facePreservationBlock(dual),
     celebrityLine,
     styleLine,
@@ -523,6 +526,8 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   ).slice(0, 120) || starName
 
   return [
+    ...harmlessFictionPreambleCompactBlock(),
+    '',
     'Utilise image_input[0] comme image de base — c\'est la vérité absolue de la photo.',
     '',
     `Crée une photo ultra réaliste de cette scène, comme si la personne sur la photo avait croisé ${starName} et pris un selfie spontané avec elle/lui.`,

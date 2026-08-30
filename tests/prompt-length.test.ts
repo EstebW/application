@@ -53,6 +53,7 @@ describe('longueur des prompts KIE', () => {
   it('selfie photo_edit suit le format KIE direct (français, 2 images)', () => {
     const raw = buildPhotoEditPrompt(worstPhotoEdit)
     const prompt = buildPhotoPrompt(worstPhotoEdit)
+    assert.match(prompt, /STARFUSION — harmless fictional fan-photo/)
     assert.match(prompt, /VERROUILLAGE PHOTO SOURCE/)
     assert.match(prompt, /conservés à 100 %/)
     assert.match(prompt, /Tête et visage/)
@@ -73,6 +74,7 @@ describe('longueur des prompts KIE', () => {
 
   it('full_generation selfie injecte le bloc POV caméra frontale', () => {
     const prompt = buildPhotoPrompt({ ...worstFullGen, interaction: 'selfie' })
+    assert.match(prompt, /STARFUSION — HARMLESS FICTION/)
     assert.match(prompt, /SELFIE POV \/ FRONT CAMERA RESULT ONLY/)
     assert.match(prompt, /NOT a third-person photo of someone taking a selfie/)
     assert.match(prompt, /Never show the phone device/)

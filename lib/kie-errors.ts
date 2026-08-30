@@ -29,6 +29,14 @@ export function formatKieError(message: string, code?: string): string {
     return 'Cette génération n\'a pas pu être réalisée automatiquement. Essaie une autre photo ou une autre mise en scène.'
   }
 
+  if (
+    lower.includes('prohibited use policy') ||
+    lower.includes('violated google') ||
+    (lower.includes('filtered out') && lower.includes('google'))
+  ) {
+    return 'Cette génération n\'a pas pu être réalisée automatiquement. Essaie une autre photo ou une autre mise en scène.'
+  }
+
   if (code === 'GENERATION_FAILED') {
     return 'La génération a échoué. Réessaie avec une autre photo ou une autre mise en scène.'
   }
