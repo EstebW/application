@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ProgressBar from './ProgressBar'
 import type { CelebrityResult } from '@/lib/types'
-import { callFunction, FunctionCallError } from '@/lib/functions'
-import { formatAnalyzeError, isTransientKieError } from '@/lib/kie-errors'
+import { runAnalysisWithPolling } from '@/lib/analysis-poll'
+import { formatAnalyzeError } from '@/lib/kie-errors'
 import {
   analysisProgressFromElapsed,
   analysisStepFromElapsed,
@@ -19,8 +19,7 @@ const STEPS = [
   'Ton jumeau vient d\'être trouvé !',
 ]
 
-const CLIENT_MAX_ATTEMPTS = 2
-const CLIENT_RETRY_DELAY_MS = 2_000
+const CLIENT_MAX_ATTEMPTS = 1
 
 interface AnalysisLoaderProps {
   preview: string
@@ -31,16 +30,7 @@ interface AnalysisLoaderProps {
 }
 
 function parseAnalysisError(err: unknown): string {
-  if (err instanceof FunctionCallError) {
-    return formatAnalyzeError(err.message, err.code)
-  }
   const raw = err instanceof Error ? err.message : 'Erreur inconnue'
-  try {
-    const parsed = JSON.parse(raw) as { error?: string }
-    if (parsed.error) return formatAnalyzeError(parsed.error)
-  } catch {
-    // pas du JSON
-  }
   return formatAnalyzeError(raw)
 }
 
@@ -74,17 +64,17 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
         if (runId.current !== currentRun) return
         if (attempt > 1) {
           setRetrying(true)
-          await new Promise((r) => setTimeout(r, CLIENT_RETRY_DELAY_MS))
+          await new Promise((r) => setTimeout(r, 2_000))
         }
 
         try {
-          const data = await callFunction<CelebrityResult & { analysisId?: string; error?: string }>(
-            'analyze',
-            { imageBase64: preparedImage, sessionId, userId },
-          )
+          const data = await runAnalysisWithPolling({
+            imageBase64: preparedImage,
+            sessionId,
+            userId,
+          })
 
           if (runId.current !== currentRun) return
-          if (data.error) throw new Error(data.error)
 
           clearInterval(progressInterval)
           setRetrying(false)
@@ -94,11 +84,6 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
           return
         } catch (err) {
           lastErr = err
-          const message = parseAnalysisError(err)
-          const transient = isTransientKieError(message) || (
-            err instanceof FunctionCallError && (err.status === 502 || err.status === 503 || err.status === 504)
-          )
-          if (!transient || attempt === CLIENT_MAX_ATTEMPTS) break
         }
       }
 

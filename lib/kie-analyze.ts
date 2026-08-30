@@ -9,7 +9,7 @@ const KIE_API_BASE = 'https://api.kie.ai'
 const ANALYZE_MODEL = 'gemini-3-flash'
 const ANALYZE_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
 const ANALYZE_TEMPERATURE = 0.2
-const ANALYZE_KIE_MAX_ATTEMPTS = 3
+const ANALYZE_KIE_MAX_ATTEMPTS = 2
 const ANALYZE_KIE_RETRY_DELAY_MS = 1_500
 
 const MATCH_SYSTEM = `Tu es le moteur d'analyse morphologique de StarFusion.
@@ -181,6 +181,10 @@ async function callWithOptionalRetry(
     }
     return extractJsonObject(raw)
   } catch (firstErr) {
+    const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr)
+    if (isTransientKieError(firstMessage)) {
+      throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
+    }
     const retryMessages: ChatMessage[] = [
       ...messages,
       {
@@ -189,7 +193,7 @@ async function callWithOptionalRetry(
       },
     ]
     try {
-      const raw = await callKieVisionWithRetry(retryMessages, apiKey)
+      const raw = await callKieVision(retryMessages, apiKey)
       return extractJsonObject(raw)
     } catch {
       throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))

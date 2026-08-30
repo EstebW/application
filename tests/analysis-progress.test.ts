@@ -27,11 +27,11 @@ describe('progression d’analyse faciale', () => {
     assert.ok(atMatch > 60 && atMatch < 80)
     assert.ok(atSlow > atMatch)
     assert.ok(atMax > atSlow)
-    assert.ok(atMax <= 96)
+    assert.ok(atMax <= 99)
   })
 
   it('ne atteint jamais 100 % tant que l’analyse n’est pas finie', () => {
-    assert.ok(analysisProgressFromElapsed(ANALYSIS_MAX_MS + 30_000) <= 96)
+    assert.ok(analysisProgressFromElapsed(ANALYSIS_MAX_MS + 30_000) <= 99)
   })
 
   it('garde le classement jusqu’à la fin réelle', () => {

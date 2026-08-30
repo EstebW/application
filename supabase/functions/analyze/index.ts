@@ -9,8 +9,13 @@ const KIE_API_BASE = 'https://api.kie.ai'
 const ANALYZE_MODEL = 'gemini-3-flash'
 const ANALYZE_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
 const ANALYZE_TEMPERATURE = 0.2
-const ANALYZE_KIE_MAX_ATTEMPTS = 3
+const ANALYZE_KIE_MAX_ATTEMPTS = 2
 const ANALYZE_KIE_RETRY_DELAY_MS = 1_500
+const ANALYSIS_POLL_INTERVAL_MS = 2_500
+const ANALYSIS_POLL_TIMEOUT_MS = 180_000
+const ANALYSIS_JOB_STALE_MS = 120_000
+
+declare const EdgeRuntime: { waitUntil?: (promise: Promise<unknown>) => void } | undefined
 
 // ── Score StarFusion (inline — Deno ne peut pas importer lib/) ──────────────
 
@@ -355,6 +360,10 @@ async function callWithOptionalRetry(
     const raw = await callKieVisionWithRetry(messages, apiKey)
     return extractJsonObject(raw)
   } catch (firstErr) {
+    const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr)
+    if (isTransientKieError(firstMessage)) {
+      throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
+    }
     const retryMessages = [
       ...messages,
       {
@@ -363,12 +372,259 @@ async function callWithOptionalRetry(
       },
     ]
     try {
-      const raw = await callKieVisionWithRetry(retryMessages, apiKey)
+      const raw = await callKieVision(retryMessages, apiKey)
       return extractJsonObject(raw)
     } catch {
       throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
     }
   }
+}
+
+type AnalysisJobRow = {
+  id: string
+  session_id: string | null
+  user_id: string | null
+  image_base64: string | null
+  status: 'pending' | 'processing' | 'success' | 'failed'
+  result_json: Record<string, unknown> | null
+  fail_message: string | null
+  analysis_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+function buildAnalysisMessages(imageBase64: string): unknown[] {
+  const imageUrl = toDataUrl(imageBase64)
+  return [
+    { role: 'system', content: MATCH_SYSTEM },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: COMBINED_ANALYZE_PROMPT },
+        { type: 'image_url', image_url: { url: imageUrl } },
+      ],
+    },
+  ]
+}
+
+function scheduleAnalysisJob(jobId: string, apiKey: string) {
+  const promise = runAnalysisJob(jobId, apiKey)
+  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
+    EdgeRuntime.waitUntil(promise)
+    return
+  }
+  promise.catch((err) => {
+    console.error('[analyze] background job failed:', err instanceof Error ? err.message : err)
+  })
+}
+
+async function persistAnalysisRecord(
+  db: ReturnType<typeof createClient>,
+  sessionId: string | null | undefined,
+  userId: string | null | undefined,
+  result: ReturnType<typeof buildCelebrityResult>,
+): Promise<string | undefined> {
+  if (!sessionId && !userId) return undefined
+
+  let writeSessionId = sessionId ?? null
+  if (userId) {
+    const { data: owned } = await db
+      .from('sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (owned?.id) writeSessionId = owned.id as string
+  }
+
+  if (!writeSessionId) return undefined
+
+  const row: Record<string, unknown> = {
+    session_id: writeSessionId,
+    celebrity_name: result.name,
+    score: result.score,
+    traits: result.traits,
+    description: result.fun_fact ?? null,
+  }
+  if (userId) row.user_id = userId
+
+  const { data, error } = await db.from('analyses').insert(row).select('id').single()
+
+  if (error && userId) {
+    const { data: fallback } = await db
+      .from('analyses')
+      .insert({
+        session_id: writeSessionId,
+        celebrity_name: result.name,
+        score: result.score,
+        traits: result.traits,
+        description: result.fun_fact ?? null,
+      })
+      .select('id')
+      .single()
+    return fallback?.id as string | undefined
+  }
+
+  return data?.id as string | undefined
+}
+
+async function runAnalysisJob(jobId: string, apiKey: string): Promise<void> {
+  const db = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    { auth: { persistSession: false } },
+  )
+
+  const { data: claimed } = await db
+    .from('analysis_jobs')
+    .update({ status: 'processing', updated_at: new Date().toISOString() })
+    .eq('id', jobId)
+    .eq('status', 'pending')
+    .select('*')
+    .maybeSingle()
+
+  const job = claimed as AnalysisJobRow | null
+  if (!job?.image_base64) return
+
+  const startMs = Date.now()
+  try {
+    const parsed = await callWithOptionalRetry(buildAnalysisMessages(job.image_base64), apiKey)
+    console.log('[analyze] job timing ms:', Date.now() - startMs, 'jobId:', jobId)
+    console.log('[analyze] candidates:', JSON.stringify(parsed).slice(0, 800))
+
+    if (typeof parsed.error === 'string' && parsed.error) {
+      throw new Error(`Analyse : ${parsed.error}`)
+    }
+
+    const result = buildCelebrityResult(parsed)
+    const analysisId = await persistAnalysisRecord(db, job.session_id, job.user_id, result)
+
+    await db.from('analysis_jobs').update({
+      status: 'success',
+      result_json: { ...result, analysisId },
+      analysis_id: analysisId ?? null,
+      image_base64: null,
+      fail_message: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', jobId)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erreur interne'
+    console.error('[analyze] job failed:', jobId, message)
+    await db.from('analysis_jobs').update({
+      status: 'failed',
+      fail_message: message,
+      image_base64: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', jobId)
+  }
+}
+
+async function handlePollJob(
+  pollJobId: string,
+  apiKey: string,
+): Promise<Response> {
+  const db = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    { auth: { persistSession: false } },
+  )
+
+  const { data: jobRaw, error } = await db
+    .from('analysis_jobs')
+    .select('*')
+    .eq('id', pollJobId)
+    .maybeSingle()
+
+  if (error || !jobRaw) {
+    return new Response(
+      JSON.stringify({ error: 'Analyse introuvable. Relance une nouvelle photo.' }),
+      { status: 404, headers: { ...CORS, 'Content-Type': 'application/json' } },
+    )
+  }
+
+  const job = jobRaw as AnalysisJobRow
+  const ageMs = Date.now() - new Date(job.updated_at).getTime()
+
+  if (job.status === 'success' && job.result_json) {
+    return new Response(
+      JSON.stringify({ status: 'success', ...job.result_json }),
+      { headers: { ...CORS, 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (job.status === 'failed') {
+    return new Response(
+      JSON.stringify({ status: 'failed', error: job.fail_message ?? 'Analyse échouée' }),
+      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (job.status === 'processing' && ageMs > ANALYSIS_JOB_STALE_MS) {
+    await db.from('analysis_jobs').update({
+      status: 'failed',
+      fail_message: 'L\'analyse a pris trop de temps. Réessaie avec une photo plus légère.',
+      image_base64: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', pollJobId)
+    return new Response(
+      JSON.stringify({
+        status: 'failed',
+        error: 'L\'analyse a pris trop de temps. Réessaie avec une photo plus légère.',
+      }),
+      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (job.status === 'pending') {
+    scheduleAnalysisJob(pollJobId, apiKey)
+  }
+
+  return new Response(
+    JSON.stringify({ status: 'pending', pollJobId }),
+    { headers: { ...CORS, 'Content-Type': 'application/json' } },
+  )
+}
+
+async function handleStartAnalysis(
+  imageBase64: string,
+  sessionId: string | undefined,
+  userId: string | undefined,
+  apiKey: string,
+): Promise<Response> {
+  const db = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    { auth: { persistSession: false } },
+  )
+
+  const { data: jobRow, error: insertErr } = await db
+    .from('analysis_jobs')
+    .insert({
+      session_id: sessionId ?? null,
+      user_id: userId ?? null,
+      image_base64: imageBase64,
+      status: 'pending',
+    })
+    .select('id')
+    .single()
+
+  if (insertErr || !jobRow?.id) {
+    throw new Error(insertErr?.message ?? 'Impossible d\'enregistrer l\'analyse en cours')
+  }
+
+  const pollJobId = jobRow.id as string
+  scheduleAnalysisJob(pollJobId, apiKey)
+
+  return new Response(
+    JSON.stringify({
+      status: 'pending',
+      pollJobId,
+      pollIntervalMs: ANALYSIS_POLL_INTERVAL_MS,
+      pollTimeoutMs: ANALYSIS_POLL_TIMEOUT_MS,
+    }),
+    { headers: { ...CORS, 'Content-Type': 'application/json' } },
+  )
 }
 
 function parseStringList(raw: unknown, max = 5): string[] {
@@ -489,105 +745,26 @@ Deno.serve(async (req: Request) => {
     const kieKey = Deno.env.get('KIE_API_KEY')
     if (!kieKey) throw new Error('KIE_API_KEY non configurée dans les secrets Supabase')
 
-    const { imageBase64, sessionId, userId } = await req.json() as {
-      imageBase64: string
+    const body = await req.json() as {
+      pollJobId?: string
+      imageBase64?: string
       sessionId?: string
       userId?: string
     }
 
-    if (!imageBase64) throw new Error('imageBase64 requis')
-
-    const imageUrl = toDataUrl(imageBase64)
-    const startMs = Date.now()
-
-    const parsed = await callWithOptionalRetry(
-      [
-        { role: 'system', content: MATCH_SYSTEM },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: COMBINED_ANALYZE_PROMPT },
-            { type: 'image_url', image_url: { url: imageUrl } },
-          ],
-        },
-      ],
-      kieKey,
-    )
-
-    console.log('[analyze] timing ms:', Date.now() - startMs)
-    console.log('[analyze] candidates:', JSON.stringify(parsed).slice(0, 800))
-
-    if (typeof parsed.error === 'string' && parsed.error) {
-      throw new Error(`Analyse : ${parsed.error}`)
+    if (typeof body.pollJobId === 'string' && body.pollJobId.trim()) {
+      return await handlePollJob(body.pollJobId.trim(), kieKey)
     }
 
-    const result = buildCelebrityResult(parsed)
+    if (!body.imageBase64) throw new Error('imageBase64 requis')
 
-    let analysisId: string | undefined
-    if (sessionId || userId) {
-      try {
-        const db = createClient(
-          Deno.env.get('SUPABASE_URL')!,
-          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-          { auth: { persistSession: false } }
-        )
-
-        let writeSessionId = sessionId ?? null
-        if (userId) {
-          const { data: owned } = await db
-            .from('sessions')
-            .select('id')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-          if (owned?.id) writeSessionId = owned.id as string
-        }
-
-        if (writeSessionId) {
-          const row: Record<string, unknown> = {
-            session_id: writeSessionId,
-            celebrity_name: result.name,
-            score: result.score,
-            traits: result.traits,
-            description: result.fun_fact ?? null,
-          }
-          if (userId) row.user_id = userId
-
-          const { data, error } = await db.from('analyses').insert(row).select('id').single()
-
-          if (error && userId) {
-            const { data: fallback } = await db
-              .from('analyses')
-              .insert({
-                session_id: writeSessionId,
-                celebrity_name: result.name,
-                score: result.score,
-                traits: result.traits,
-                description: result.fun_fact ?? null,
-              })
-              .select('id')
-              .single()
-            analysisId = fallback?.id
-          } else {
-            analysisId = data?.id
-          }
-        }
-      } catch (dbErr) {
-        console.warn('[analyze] DB insert failed:', dbErr)
-      }
-    }
-
-    return new Response(
-      JSON.stringify({ ...result, analysisId }),
-      { headers: { ...CORS, 'Content-Type': 'application/json' } }
-    )
+    return await handleStartAnalysis(body.imageBase64, body.sessionId, body.userId, kieKey)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erreur interne'
     console.error('[analyze] final error:', message)
     return new Response(
       JSON.stringify({ error: message }),
-      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } },
     )
   }
 })

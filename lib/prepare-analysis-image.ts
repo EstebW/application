@@ -1,5 +1,5 @@
 /** Taille max côté long pour l'analyse faciale — suffisant pour la morphologie, allège le payload KIE. */
-export const ANALYSIS_IMAGE_MAX_SIDE = 1280
+export const ANALYSIS_IMAGE_MAX_SIDE = 1024
 
 /** Seuil base64 (~600 Ko) en dessous duquel on ne recompresse pas. */
 const SKIP_RECOMPRESS_BELOW_CHARS = 600_000

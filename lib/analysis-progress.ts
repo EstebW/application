@@ -8,8 +8,8 @@
 
 export const ANALYSIS_FACE_MS = 8_000
 export const ANALYSIS_MATCH_MS = 18_000
-export const ANALYSIS_SLOW_MS = 35_000
-export const ANALYSIS_MAX_MS = 60_000
+export const ANALYSIS_SLOW_MS = 45_000
+export const ANALYSIS_MAX_MS = 180_000
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
@@ -23,7 +23,7 @@ function easeOut(t: number) {
   return 1 - (1 - clamp(t, 0, 1)) ** 1.35
 }
 
-/** 3–96 % tant que l’analyse n’est pas terminée. */
+/** 3–99 % tant que l’analyse n’est pas terminée. */
 export function analysisProgressFromElapsed(elapsedMs: number): number {
   const ms = Math.max(0, elapsedMs)
 
@@ -42,7 +42,7 @@ export function analysisProgressFromElapsed(elapsedMs: number): number {
   }
 
   const t = (ms - ANALYSIS_SLOW_MS) / (ANALYSIS_MAX_MS - ANALYSIS_SLOW_MS)
-  return round1(88 + 8 * clamp(t, 0, 1))
+  return round1(88 + 11 * clamp(t, 0, 1))
 }
 
 /**
