@@ -10,7 +10,7 @@ import { DEFAULT_CREATION_MODE } from '@/lib/types'
 import { callFunction, FunctionCallError } from '@/lib/functions'
 import { formatKieError, isSensitiveContentError } from '@/lib/kie-errors'
 import { runGenerationWithPolling } from '@/lib/generation-poll'
-import { getCelebrityFirstName } from '@/lib/celebrity-image'
+import { getCelebrityFirstName, resolveCelebrityImageDataUrl } from '@/lib/celebrity-image'
 import { celebrityIdFromName } from '@/lib/height'
 import {
   generationProgressFromElapsed,
@@ -72,14 +72,20 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
       setStepIndex(generationStepFromElapsed(elapsed))
     }, 250)
 
-    runGenerationWithPolling({
+    void (async () => {
+      let celebRef = celebrityImageBase64
+      if (!celebRef) {
+        celebRef = (await resolveCelebrityImageDataUrl(name)) ?? undefined
+      }
+
+      return runGenerationWithPolling({
         imageBase64,
         celebrityName: name,
         celebrityDomain: celebrity_domain,
         celebrityStyleDescription: celebrity_style_description,
         celebrityTraits: celebrity.traits,
         funFact: celebrity.fun_fact,
-        celebrityImageBase64,
+        celebrityImageBase64: celebRef,
         generationMode: generationRequest.mode,
         creationMode: resolvedCreationMode,
         sceneSource: isPhotoEdit ? undefined : generationRequest.sceneSource,
@@ -100,6 +106,7 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
         email,
         analysisId,
       })
+    })()
       .then((data) => {
         clearInterval(progressInterval)
 

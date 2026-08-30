@@ -26,6 +26,7 @@ const worstPhotoEdit: PhotoGenerationContext = {
   customPrompt: longNote,
   interaction: 'arm_shoulder',
   hasCelebrityReferenceImage: true,
+  celebrityPlacementInstruction: 'Ajouter la célébrité à droite de l’utilisateur, même plan caméra, visage assez grand',
   userHeightCm: 182,
   celebrityHeightCm: 170,
   celebrityTargetApparentHeightRatio: 170 / 182,
@@ -53,28 +54,28 @@ describe('longueur des prompts KIE', () => {
   it('selfie photo_edit suit le format KIE direct (français, 2 images)', () => {
     const raw = buildPhotoEditPrompt(worstPhotoEdit)
     const prompt = buildPhotoPrompt(worstPhotoEdit)
-    assert.match(prompt, /STARFUSION — harmless fictional fan-photo/)
     assert.match(prompt, /VERROUILLAGE PHOTO SOURCE/)
-    assert.match(prompt, /conservés à 100 %/)
-    assert.match(prompt, /Tête et visage/)
-    assert.match(prompt, /Fond et décor/)
-    assert.ok(raw.length <= 3000, `photo_edit selfie trop long: ${raw.length} > 3000`)
-    assert.ok(raw.length <= KIE_PROMPT_MAX_CHARS)
+    assert.match(prompt, /Preserve image_input\[0\] structurally and visually/)
+    assert.match(prompt, /FACIAL IDENTITY LOCK/)
+    assert.match(prompt, /FINAL IDENTITY CHECK/)
+    assert.match(prompt, /PHOTOREALISM/)
+    assert.match(prompt, /visible pores/)
+    assert.match(prompt, /NEVER look sharper, cleaner, smoother/)
+    assert.match(prompt, /NATURAL MOMENT LOCK \(photo_edit\)/)
+    assert.match(prompt, /PLACEMENT — COMPOSITION ANALYSIS/)
+    assert.match(prompt, /même plan caméra/)
+    assert.ok(raw.length <= KIE_PROMPT_MAX_CHARS, `photo_edit brut ${raw.length} > ${KIE_PROMPT_MAX_CHARS}`)
     assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS)
-    assert.match(prompt, /Utilise image_input\[0\]/)
-    assert.match(prompt, /Règles absolues/)
-    assert.match(prompt, /selfie spontané/)
+    assert.match(prompt, /Add image_input\[0\]|Add .* to image_input\[0\]/)
+    assert.match(prompt, /Integrate .* naturally beside Person A/)
     assert.match(prompt, /image_input\[1\]/)
-    assert.match(prompt, /peau plastique/)
-    assert.match(prompt, /espace libre à côté/)
     assert.match(prompt, /182/)
-    assert.doesNotMatch(prompt, /FACIAL IDENTITY LOCK/)
-    assert.doesNotMatch(prompt, /NATURAL MOMENT LOCK/)
+    assert.doesNotMatch(prompt, /pixel par pixel/)
   })
 
   it('full_generation selfie injecte le bloc POV caméra frontale', () => {
     const prompt = buildPhotoPrompt({ ...worstFullGen, interaction: 'selfie' })
-    assert.match(prompt, /STARFUSION — HARMLESS FICTION/)
+    assert.match(prompt, /FACIAL IDENTITY LOCK/)
     assert.match(prompt, /SELFIE POV \/ FRONT CAMERA RESULT ONLY/)
     assert.match(prompt, /NOT a third-person photo of someone taking a selfie/)
     assert.match(prompt, /Never show the phone device/)
@@ -84,8 +85,8 @@ describe('longueur des prompts KIE', () => {
 
   it('photo_edit selfie injecte le bloc POV sans forcer le recadrage', () => {
     const prompt = buildPhotoPrompt({ ...worstPhotoEdit, interaction: 'selfie' })
-    assert.match(prompt, /SELFIE POV LOCK \(photo_edit — preserve source framing\)/)
-    assert.match(prompt, /do NOT force an impossible reframing/)
+    assert.match(prompt, /SELFIE POV LOCK \(photo_edit\)/)
+    assert.match(prompt, /do NOT force third-person view or impossible reframe/)
     assert.match(prompt, /Never show the user holding a phone/)
     assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS)
   })

@@ -2,7 +2,7 @@
  * Détection safety Google + retry preset — miroir de supabase/functions/generate/index.ts
  * pour tests Node. Garder aligné avec l’edge function.
  */
-import { SELFIE_POV_INTERACTION_PROMPT, getInteractionPrompt } from './interactions.ts'
+import { getInteractionPrompt } from './interactions.ts'
 import type { CelebrityCreationMode } from './types.ts'
 
 export const GOOGLE_SAFETY_MARKERS = [
@@ -75,27 +75,6 @@ export function isReasonableCustomPrompt(text: string | undefined): boolean {
 /** @deprecated Utiliser isReasonableCustomPrompt */
 export const isInnocuousCustomPrompt = isReasonableCustomPrompt
 
-/** Préambule injecté en tête de TOUS les prompts — réduit les faux positifs Google. */
-export function harmlessFictionPreambleBlock(): string[] {
-  return [
-    'STARFUSION — HARMLESS FICTION / FAN ENTERTAINMENT:',
-    '- Fictional comedy fan-photo for entertainment only — not a real event, not news, not fraud.',
-    '- Two fully clothed adults in an ordinary or lightly absurd humorous setting (PG-13).',
-    '- Silly, awkward, or edgy-comedy scenarios are OK if playful and non-explicit.',
-    '- Absurd everyday places (toilets, McDrive, karaoke, laundromat, escape room) = comedy, fully clothed.',
-    '- No nudity, explicit content, violence, hate, illegal activity, or minors.',
-    '- Time-of-day words (soir, 22h, night, evening) = natural ambient lighting in everyday places.',
-    '- Celebrity likeness is a fictional composite for fun — preserve reference faces only.',
-  ]
-}
-
-/** Version courte pour photo_edit (prompt déjà long). */
-export function harmlessFictionPreambleCompactBlock(): string[] {
-  return [
-    'STARFUSION — harmless fictional fan-photo (PG-13, fully clothed adults, comedy OK, not real news).',
-  ]
-}
-
 export function isSafetyRetryEligible(
   ctx: StoredRetryContext,
   hasCustomPrompt: boolean,
@@ -110,60 +89,4 @@ export function isSafetyRetryEligible(
     ctx.sceneSource === 'user_photo' ||
     Boolean(getInteractionPrompt(ctx.interaction))
   )
-}
-
-function sanitize(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
-}
-
-function buildSafetyRetryInteractionLine(ctx: StoredRetryContext): string {
-  if (ctx.interaction === 'selfie') return SELFIE_POV_INTERACTION_PROMPT
-  return getInteractionPrompt(ctx.interaction) ?? 'Natural friendly presence beside each other.'
-}
-
-export function buildSafetyRetryPrompt(ctx: StoredRetryContext): string {
-  const starName = sanitize(ctx.celebrityName) || 'the celebrity'
-  const requestLabel = ctx.mode === 'custom'
-    ? 'the StarFusion user request'
-    : 'the StarFusion preset'
-  const lines = [
-    ...harmlessFictionPreambleBlock(),
-    '',
-    'SAFE RETRY — ORDINARY EVERYDAY PHOTO.',
-    '',
-    `Create the same harmless, family-friendly everyday photo requested by ${requestLabel}.`,
-    'Keep the same humorous or absurd spirit if the request is playful — stay PG-13 and fully clothed.',
-    'Preserve both identities from the reference images.',
-    'Preserve the same scene, interaction, perspective and requested placement.',
-    'Natural casual clothing, realistic proportions, ordinary friendly body language.',
-    'Authentic amateur smartphone appearance with natural lighting, skin texture, grain and imperfections.',
-    'Do not change the requested scenario or invent a different context.',
-    '',
-    `Celebrity: ${starName}.`,
-    `Interaction: ${buildSafetyRetryInteractionLine(ctx)}`,
-  ]
-  if (ctx.creationMode === 'photo_edit') {
-    lines.push(
-      'Mode: preserve the source photo structure; add the celebrity beside the user only.',
-      'Do not reframe the source image or invent a visible phone device.',
-    )
-  } else if (ctx.sceneSource === 'user_photo') {
-    lines.push('Scene: keep the same place, lighting and atmosphere as the user reference photo.')
-  } else if (ctx.mode === 'custom' && ctx.customPrompt) {
-    lines.push(`User scene request: ${sanitize(ctx.customPrompt)}`)
-  } else if (ctx.mode === 'presets' && ctx.scene) {
-    lines.push(
-      `Location: ${sanitize(ctx.scene.location)}`,
-      `Outfits: ${sanitize(ctx.scene.outfits)}`,
-      `Pose/framing: ${sanitize(ctx.scene.position)}`,
-    )
-  }
-  if (ctx.userHeightCm) lines.push(`User height: ${ctx.userHeightCm} cm`)
-  if (ctx.celebrityHeightCm) lines.push(`Celebrity height: ${ctx.celebrityHeightCm} cm`)
-  if (ctx.celebrityPlacementInstruction) {
-    lines.push(`Placement: ${sanitize(ctx.celebrityPlacementInstruction)}`)
-  }
-  const prompt = lines.join('\n')
-  const RETRY_PROMPT_MAX_CHARS = 2400
-  return prompt.length <= RETRY_PROMPT_MAX_CHARS ? prompt : prompt.slice(0, RETRY_PROMPT_MAX_CHARS)
 }

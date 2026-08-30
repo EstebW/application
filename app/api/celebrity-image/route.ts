@@ -1,42 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { fetchCelebrityWikiImageUrl } from '@/lib/celebrity-image'
 
 export const runtime = 'edge'
 
 const UA = 'StarFusion/1.0 (https://starfusion.app; celebrity portrait lookup)'
 
-type WikiSummary = {
-  type?: string
-  thumbnail?: { source?: string }
-  originalimage?: { source?: string }
-}
-
-async function fetchWikiThumb(lang: 'fr' | 'en', title: string): Promise<string | null> {
-  const url = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`
-  const res = await fetch(url, {
-    headers: { Accept: 'application/json', 'User-Agent': UA },
-    next: { revalidate: 86400 },
-  })
+async function wikiImageToDataUrl(imageUrl: string): Promise<string | null> {
+  const res = await fetch(imageUrl, { headers: { 'User-Agent': UA } })
   if (!res.ok) return null
-  const data = (await res.json()) as WikiSummary
-  if (data.type === 'disambiguation') return null
-  return data.thumbnail?.source || data.originalimage?.source || null
+  const bytes = new Uint8Array(await res.arrayBuffer())
+  const mime = res.headers.get('content-type')?.split(';')[0]?.trim() || 'image/jpeg'
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!)
+  return `data:${mime};base64,${btoa(binary)}`
 }
 
 export async function GET(req: NextRequest) {
   const name = req.nextUrl.searchParams.get('name')?.trim()
+  const format = req.nextUrl.searchParams.get('format')
   if (!name) {
     return NextResponse.json({ error: 'name required' }, { status: 400 })
   }
 
   try {
-    const fr = await fetchWikiThumb('fr', name)
-    if (fr) return NextResponse.json({ url: fr })
+    const url = await fetchCelebrityWikiImageUrl(name)
+    if (!url) return NextResponse.json({ url: null, dataUrl: null })
 
-    const en = await fetchWikiThumb('en', name)
-    if (en) return NextResponse.json({ url: en })
+    if (format === 'dataurl') {
+      const dataUrl = await wikiImageToDataUrl(url)
+      return NextResponse.json({ url, dataUrl })
+    }
 
-    return NextResponse.json({ url: null })
+    return NextResponse.json({ url })
   } catch {
-    return NextResponse.json({ url: null }, { status: 502 })
+    return NextResponse.json({ url: null, dataUrl: null }, { status: 502 })
   }
 }

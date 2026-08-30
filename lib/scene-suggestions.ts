@@ -1,5 +1,4 @@
 import { getInteractionPrompt } from './interactions.ts'
-import { harmlessFictionPreambleBlock, harmlessFictionPreambleCompactBlock } from './generation-safety.ts'
 import { heightConsistencyBlock } from './height-prompt.ts'
 import type { CelebrityCreationMode, PhotoGenerationContext, PhotoScene } from './types.ts'
 
@@ -159,7 +158,7 @@ interface PromptSection {
 }
 
 const PROTECTED_SECTION_HEADER =
-  /^(STARFUSION — HARMLESS FICTION|ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|SELFIE POV|VERROUILLAGE PHOTO SOURCE)/i
+  /^(ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK|FACIAL IDENTITY LOCK|PERSON A HARD LOCK|PERSON B HARD LOCK|FINAL IDENTITY CHECK|PLACEMENT — COMPOSITION ANALYSIS|USER SCENE BRIEF|USER SCENE PROMPT|KEEP THE USER PHOTO SCENE|PLACEMENT|PHYSICAL HEIGHT|PHYSICAL SCALE|SCALE:|PHOTOREALISM|NATURAL MOMENT LOCK|SELFIE LOCK|SELFIE POV|VERROUILLAGE PHOTO SOURCE)/i
 const SECONDARY_SECTION_HEADER =
   /^(SCENE REQUIREMENTS|FINAL MANDATORY CHECK|SUBJECTS:)/i
 const OTHER_SECTION_HEADER =
@@ -281,11 +280,13 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
   return [
     'ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK:',
     dual
-      ? 'IDENTITY-PRESERVING COMPOSITE with TWO reference photos. Not face generation, not beautification.'
+      ? 'IDENTITY-PRESERVING COMPOSITE with TWO reference photos. Not face generation, not beautification, not lookalike casting.'
       : "IDENTITY-PRESERVING EDIT of Person A from image_input[0]. Never transfer the celebrity's look onto Person A.",
     dual
       ? '- image_input[0] = Person A (USER). image_input[1] = Person B (CELEBRITY).'
       : '- image_input[0] = Person A (USER) — sole identity source for Person A.',
+    'NON-NEGOTIABLE: copy faces from reference images. Do not invent, average, or beautify faces.',
+    'Exactly two people in the photo: Person A and Person B. No extra faces.',
     'PERSON A HARD LOCK:',
     '- Same person as image_input[0]: bone structure, face width, jaw, eyes, nose, lips, skin, age, marks.',
     '- HAIR LOCK: exact color, texture, length, volume, parting, hairline, style. Do not restyle to match the celebrity.',
@@ -294,13 +295,25 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
     ...(dual
       ? [
           'PERSON B HARD LOCK:',
-          '- Copy face and hair from image_input[1]. Do not invent a generic lookalike. Clothes from image_input[1] are NOT locked — dress for the scene.',
+          '- Copy face and hair from image_input[1] exactly. Do not invent a generic lookalike or a different celebrity.',
+          '- Person B must be instantly recognizable as the same person as image_input[1]. Clothes from image_input[1] are NOT locked — dress for the scene.',
           'FAIL if either face is not instantly the same person, if Person A hair/face width drifted, or if Person B keeps iconic clothes when the scene is casual.',
         ]
       : [
           'PERSON B is a different person. Never nudge Person A toward Person B.',
           'FAIL if Person A is not the same person as image_input[0], if hair/face width changed, or if Person A looks like a hybrid with the celebrity.',
         ]),
+  ]
+}
+
+function facePreservationClosingBlock(hasCelebrityReferenceImage: boolean): string[] {
+  const dual = hasCelebrityReferenceImage
+  return [
+    'FINAL IDENTITY CHECK (before output):',
+    dual
+      ? '- Person A must match image_input[0] and Person B must match image_input[1]. If either face drifted, regenerate internally until both match.'
+      : '- Person A must match image_input[0] exactly. Person B must look like a distinct celebrity, not a morph of Person A.',
+    '- Reject any result where faces look AI-smoothed, swapped, averaged, or younger/prettier than the references.',
   ]
 }
 
@@ -322,6 +335,52 @@ function naturalMomentBlock(): string[] {
     'NATURAL MOMENT LOCK: the result must look like a genuine candid shared moment between two real people already together, not two subjects placed side by side.',
     'Relaxed posture, subtle torso rotation, slight lean/head tilt, natural asymmetry, believable proximity. A slight lean-in or arm around shoulder/waist/back is allowed if it improves realism. Small pose tweaks OK for a believable instant.',
     'Avoid stiff, static, symmetrical, overly frontal/centered, or cutout-next-to-user poses. Expressions unforced. Realism = photographic texture AND living human interaction.',
+  ]
+}
+
+const REASONABLE_CUSTOM_MAX_CHARS = 600
+
+/** Verrouillage facial compact pour photo_edit (mêmes règles, moins de redondance). */
+function photoEditFacePreservationBlock(dual: boolean): string[] {
+  return [
+    'ABSOLUTE PRIORITY — FACIAL IDENTITY LOCK:',
+    dual
+      ? 'Copy faces from image_input[0] (Person A) and image_input[1] (Person B). No generation, beautification, morphing, or lookalike casting.'
+      : "Copy Person A from image_input[0] only. Never transfer the celebrity's look onto Person A.",
+    'Exactly two people. No extra faces.',
+    'PERSON A HARD LOCK:',
+    '- Match image_input[0]: bone structure, face width, jaw, eyes, nose, lips, skin, age, marks.',
+    '- HAIR LOCK: exact color, texture, length, volume, parting, hairline, style. No celebrity restyle.',
+    '- No morph, blend, beautify, slim, puff, or average with the celebrity.',
+    ...(dual
+      ? [
+          'PERSON B HARD LOCK:',
+          '- Copy face and hair from image_input[1] exactly — instantly recognizable, not a generic lookalike.',
+          '- Clothes from image_input[1] NOT locked — dress for the scene.',
+        ]
+      : ['PERSON B is a different person. Never nudge Person A toward Person B.']),
+  ]
+}
+
+/** Photoréalisme photo_edit — aligné sur photorealismBlock(), calé sur image_input[0]. */
+function photoEditPhotorealismBlock(): string[] {
+  return [
+    'PHOTOREALISM — match source photo (amateur smartphone, not studio/CGI):',
+    'No beauty filter, AI-smooth skin, porcelain/waxy/plastic finish, or airbrush.',
+    'Natural imperfections only: visible pores, slight uneven tone, subtle under-eye texture, fine lines, facial asymmetry.',
+    'Do not invent new moles, scars, or distinctive marks. Hair: individual strands and small flyaways.',
+    'Grain, noise, compression, sharpness, exposure, white balance and softness must match image_input[0] exactly.',
+    'The celebrity must NEVER look sharper, cleaner, smoother, better lit or more professionally retouched than the user.',
+  ]
+}
+
+function photoEditNaturalMomentBlock(starName: string): string[] {
+  const celeb = sanitizeSceneText(starName) || 'the celebrity'
+  return [
+    'NATURAL MOMENT LOCK (photo_edit):',
+    'Credible interaction, natural asymmetry, believable proximity — not two cutouts side by side.',
+    `${celeb} may lean slightly toward Person A; relaxed shoulders, spontaneous expression. Avoid stiff/symmetrical/ad-style poses.`,
+    'Person A stays unchanged. Person B adapts to Person A — never the reverse.',
   ]
 }
 
@@ -359,12 +418,10 @@ export function selfiePovBlock(
 
   if (creationMode === 'photo_edit') {
     return [
-      'SELFIE POV LOCK (photo_edit — preserve source framing):',
-      '- Final image = the resulting selfie POV, NOT a third-person view of someone taking a selfie.',
-      '- Never show the phone device. Never show the user holding a phone.',
-      '- If image_input[0] is already a front-camera selfie POV, keep that exact perspective — do not reframe.',
-      '- If the source is NOT already a selfie POV, do NOT force an impossible reframing: keep natural proximity and both people looking toward the camera lens, without inventing a visible phone.',
-      '- Close faces, natural casual composition, authentic smartphone feel.',
+      'SELFIE POV LOCK (photo_edit):',
+      '- If image_input[0] is already front-camera selfie POV: keep that exact perspective — do not reframe.',
+      '- If NOT a selfie POV: do NOT force third-person view or impossible reframe; keep natural proximity and gazes toward the implicit camera/lens.',
+      '- Never show a phone. Never show the user holding a phone.',
     ]
   }
 
@@ -425,8 +482,6 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
   ].filter(Boolean)
 
   const wrap = (sceneBlock: string[]) => [
-    ...harmlessFictionPreambleBlock(),
-    '',
     ...facePreservationBlock(dual),
     celebrityLine,
     styleLine,
@@ -435,6 +490,8 @@ export function buildFullGenerationPrompt(ctx: PhotoGenerationContext): string {
     ...sceneBlock,
     '',
     ...closingBlocks,
+    '',
+    ...facePreservationClosingBlock(dual),
   ].filter((line) => line !== '').join('\n')
 
   if (sceneSource === 'user_photo') {
@@ -504,8 +561,7 @@ function photoEditHeightLinesFr(ctx: PhotoGenerationContext, starName: string): 
 }
 
 /**
- * Prompt selfie « Ajouter la star à ma photo » — formulé comme les tests KIE directs
- * (préservation stricte de la photo source + star dans l'espace libre).
+ * Prompt selfie « Ajouter la star à ma photo » — fidélité faciale + intégration physique crédible.
  */
 export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
   const {
@@ -515,49 +571,53 @@ export function buildPhotoEditPrompt(ctx: PhotoGenerationContext): string {
     customPrompt,
     hasCelebrityReferenceImage,
     interaction,
+    celebrityPlacementInstruction,
   } = ctx
   const starName = sanitizeSceneText(celebrityName) || 'la célébrité'
   const domain = sanitizeSceneText(celebrityDomain)
   const style = celebrityStyleDescription ? sanitizeSceneText(celebrityStyleDescription) : ''
   const dual = Boolean(hasCelebrityReferenceImage)
-  const userHint = customPrompt ? sanitizeSceneText(customPrompt).slice(0, 120) : ''
+  const userHint = customPrompt
+    ? sanitizeSceneText(customPrompt).slice(0, REASONABLE_CUSTOM_MAX_CHARS)
+    : ''
   const starDescription = sanitizeSceneText(
     dual ? (domain ? `${starName} (${domain})` : starName) : [domain && `${starName} (${domain})`, style].filter(Boolean).join('. ')
   ).slice(0, 120) || starName
+  const placementLines = celebrityPlacementInstruction
+    ? [
+        'PLACEMENT — COMPOSITION ANALYSIS:',
+        `- ${sanitizeSceneText(celebrityPlacementInstruction)}`,
+      ]
+    : []
 
   return [
-    ...harmlessFictionPreambleCompactBlock(),
+    ...photoEditFacePreservationBlock(dual),
     '',
-    'Utilise image_input[0] comme image de base — c\'est la vérité absolue de la photo.',
-    '',
-    `Crée une photo ultra réaliste de cette scène, comme si la personne sur la photo avait croisé ${starName} et pris un selfie spontané avec elle/lui.`,
+    `Add ${starName} to image_input[0] as if they were always in the photo.`,
     ...(dual
-      ? [`image_input[1] sert uniquement à reconnaître le visage et les cheveux de ${starName} — pas à copier la tenue ni le décor de la référence.`]
+      ? [`image_input[1] = face/hair ref for ${starName} only — not clothes or background.`]
       : []),
     '',
-    'VERROUILLAGE PHOTO SOURCE (priorité absolue — 0 erreur tolérée) :',
-    '- Fond et décor de image_input[0] conservés à 100 % : mêmes bâtiments, rue, ciel, objets, ombres, lumière, angle, perspective, netteté, colorimétrie. Ne recadre pas, ne reconstruis pas, ne remplace pas l\'arrière-plan.',
-    '- Tête et visage de la personne sur image_input[0] conservés à 100 % : même identité, forme du visage, yeux, nez, bouche, cheveux, carnation, expression, angle de tête. Interdit de la remplacer, la retoucher, l\'embellir, la rajeunir ou la fusionner avec la star.',
-    '- Seule modification autorisée : ajouter la star dans l\'espace libre à côté. Tout le reste de image_input[0] reste figé pixel par pixel.',
+    'VERROUILLAGE PHOTO SOURCE:',
+    'Preserve image_input[0] structurally and visually — Person A identity, hair, body, position, environment unchanged.',
+    'Only tiny LOCAL changes for the added celebrity: occlusion, contact shadows, reflected light, overlapping edges, local grain/noise match.',
+    'Never reconstruct the scene, move important objects, beautify Person A, or alter Person A\'s face.',
     '',
-    'Règles absolues :',
-    `- Ajoute uniquement ${starName} dans l'espace libre à côté, comme si la photo avait été prise à deux dès l'origine.`,
-    '- Star immédiatement reconnaissable, intégration naturelle sans collage visible.',
+    ...placementLines,
+    ...(placementLines.length > 0 ? [''] : []),
+    `- Integrate ${starName} naturally beside Person A — recognizable, no visible collage.`,
     ...photoEditHeightLinesFr(ctx, starName),
-    '- Tenue casual réaliste adaptée au lieu (pas tapis rouge, pas look trop stylisé).',
-    '- Résultat = vrai selfie iPhone sur le vif, pas photo studio.',
+    '- Casual scene-appropriate clothes (not red carpet).',
     '',
-    'Style : lumière naturelle, peau avec texture réelle et petits défauts, cheveux vivants, proportions justes, posture détendue, rencontre spontanée.',
+    ...photoEditPhotorealismBlock(),
     '',
-    'Composition : la personne reste exactement à sa place, inchangée. La star occupe uniquement l\'espace vide à côté, légèrement penchée, proche, attitude amicale.',
-    '',
-    'À éviter absolument : fond modifié, tête ou visage de l\'utilisateur remplacé/retouché, peau plastique, effet beauté, visage déformé, arrière-plan reconstruit, pose trop parfaite, rendu pro, collage visible.',
-    ...(userHint ? ['', `Note : ${userHint}`] : []),
-    ...(dual ? [] : ['', `Célébrité : ${starDescription}.`]),
+    ...photoEditNaturalMomentBlock(starName),
     '',
     ...selfiePovBlock(interaction ?? 'selfie', 'photo_edit'),
+    ...(userHint ? ['', `Note utilisateur : ${userHint}`] : []),
+    ...(dual ? [] : ['', `Célébrité : ${starDescription}.`]),
     '',
-    `Objectif : une vraie photo selfie — la personne et le fond de image_input[0] intacts à 100 %, ${starName} ajoutée naturellement à côté.`,
+    ...facePreservationClosingBlock(dual),
   ].filter((line) => line !== '').join('\n')
 }
 
@@ -570,6 +630,12 @@ export function buildPhotoPrompt(ctx: PhotoGenerationContext): string {
     ? buildPhotoEditPrompt(ctx)
     : buildFullGenerationPrompt(ctx)
   return clampKiePrompt(prompt).prompt
+}
+
+/** Retry safety : même prompt qualité + préfixe court PG-13 (pas un prompt minimaliste). */
+export function buildSafetyRetryPhotoPrompt(ctx: PhotoGenerationContext): string {
+  const prefix = 'SAFE RETRY — preserve both reference faces and the requested scene exactly; PG-13, fully clothed adults.\n\n'
+  return clampKiePrompt(prefix + buildPhotoPrompt(ctx)).prompt
 }
 
 export const CUSTOM_PROMPT_EXAMPLES = [

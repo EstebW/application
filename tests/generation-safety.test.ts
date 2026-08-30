@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { CUSTOM_PROMPT_EXAMPLES } from '../lib/scene-suggestions.ts'
+import { CUSTOM_PROMPT_EXAMPLES, buildSafetyRetryPhotoPrompt } from '../lib/scene-suggestions.ts'
 import {
-  buildSafetyRetryPrompt,
   isGoogleSafetyBlockedMessage,
   isProhibitedPromptContent,
   isReasonableCustomPrompt,
@@ -113,46 +112,53 @@ describe('éligibilité retry safety', () => {
   })
 })
 
-describe('buildSafetyRetryPrompt', () => {
-  it('inclut le préambule fiction et la demande user en mode custom', () => {
-    const prompt = buildSafetyRetryPrompt({
+describe('buildSafetyRetryPhotoPrompt', () => {
+  it('conserve le verrouillage visage et la demande user en mode custom', () => {
+    const prompt = buildSafetyRetryPhotoPrompt({
       celebrityName: 'Ryan Gosling',
+      celebrityDomain: 'Acteur',
       mode: 'custom',
-      customPrompt: 'une photo le soir à 22h',
+      creationMode: 'full_generation',
+      customPrompt: 'une photo dans la rue',
       interaction: 'side_by_side',
+      hasCelebrityReferenceImage: true,
     })
-    assert.match(prompt, /STARFUSION — HARMLESS FICTION/)
-    assert.match(prompt, /User scene request: une photo le soir à 22h/)
-    assert.match(prompt, /StarFusion user request/)
-    assert.match(prompt, /humorous or absurd spirit/)
+    assert.match(prompt, /SAFE RETRY — preserve both reference faces/)
+    assert.match(prompt, /FACIAL IDENTITY LOCK/)
+    assert.match(prompt, /USER SCENE PROMPT/)
+    assert.match(prompt, /une photo dans la rue/)
+    assert.doesNotMatch(prompt, /HARMLESS FICTION/)
   })
 
-  it('reste court et neutre', () => {
-    const prompt = buildSafetyRetryPrompt({
+  it('reste sous la limite KIE', () => {
+    const prompt = buildSafetyRetryPhotoPrompt({
       celebrityName: 'Ryan Gosling',
+      celebrityDomain: 'Acteur',
       mode: 'presets',
       creationMode: 'full_generation',
       interaction: 'selfie',
+      hasCelebrityReferenceImage: true,
       scene: {
         location: 'Parc',
         outfits: 'Casual',
         position: 'Selfie POV',
       },
     })
-    assert.ok(prompt.length <= 2400)
-    assert.match(prompt, /SAFE RETRY — ORDINARY EVERYDAY PHOTO/)
-    assert.match(prompt, /FRONT CAMERA RESULT ONLY/)
+    assert.ok(prompt.length <= 4900)
+    assert.match(prompt, /FACIAL IDENTITY LOCK/)
+    assert.match(prompt, /SELFIE POV \/ FRONT CAMERA RESULT ONLY/)
   })
 
   it('conserve le placement photo_edit', () => {
-    const prompt = buildSafetyRetryPrompt({
+    const prompt = buildSafetyRetryPhotoPrompt({
       celebrityName: 'Star',
+      celebrityDomain: 'Acteur',
       mode: 'presets',
       creationMode: 'photo_edit',
       interaction: 'selfie',
       celebrityPlacementInstruction: 'Ajouter à droite, même plan caméra',
     })
-    assert.match(prompt, /preserve the source photo structure/)
-    assert.match(prompt, /Placement: Ajouter à droite/)
+    assert.match(prompt, /VERROUILLAGE PHOTO SOURCE/)
+    assert.match(prompt, /SAFE RETRY — preserve both reference faces/)
   })
 })
