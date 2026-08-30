@@ -121,7 +121,6 @@ async function callKieVision(messages: ChatMessage[], apiKey: string): Promise<s
     body: JSON.stringify({
       messages,
       stream: false,
-      reasoning_effort: 'low',
       temperature: ANALYZE_TEMPERATURE,
     }),
   })

@@ -12,10 +12,10 @@ const ANALYZE_TEMPERATURE = 0.2
 const ANALYZE_KIE_MAX_ATTEMPTS = 2
 const ANALYZE_KIE_RETRY_DELAY_MS = 1_500
 const ANALYSIS_POLL_INTERVAL_MS = 2_500
-const ANALYSIS_POLL_TIMEOUT_MS = 180_000
-const ANALYSIS_JOB_STALE_MS = 120_000
+const ANALYSIS_POLL_TIMEOUT_MS = 300_000
+const ANALYSIS_JOB_RETRY_MS = 90_000
+const ANALYSIS_JOB_ABSOLUTE_MAX_MS = 600_000
 
-declare const EdgeRuntime: { waitUntil?: (promise: Promise<unknown>) => void } | undefined
 
 // ── Score StarFusion (inline — Deno ne peut pas importer lib/) ──────────────
 
@@ -304,7 +304,6 @@ async function callKieVision(messages: unknown[], apiKey: string): Promise<strin
     body: JSON.stringify({
       messages,
       stream: false,
-      reasoning_effort: 'low',
       temperature: ANALYZE_TEMPERATURE,
     }),
   })
@@ -407,15 +406,54 @@ function buildAnalysisMessages(imageBase64: string): unknown[] {
   ]
 }
 
-function scheduleAnalysisJob(jobId: string, apiKey: string) {
-  const promise = runAnalysisJob(jobId, apiKey)
-  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
-    EdgeRuntime.waitUntil(promise)
-    return
+async function reloadAnalysisJob(
+  db: ReturnType<typeof createClient>,
+  pollJobId: string,
+): Promise<AnalysisJobRow | null> {
+  const { data } = await db
+    .from('analysis_jobs')
+    .select('*')
+    .eq('id', pollJobId)
+    .maybeSingle()
+  return (data as AnalysisJobRow | null) ?? null
+}
+
+async function recoverStaleProcessingJob(
+  db: ReturnType<typeof createClient>,
+  job: AnalysisJobRow,
+): Promise<AnalysisJobRow> {
+  const ageMs = Date.now() - new Date(job.updated_at).getTime()
+  const totalAgeMs = Date.now() - new Date(job.created_at).getTime()
+
+  if (job.status !== 'processing' || ageMs <= ANALYSIS_JOB_RETRY_MS) {
+    return job
   }
-  promise.catch((err) => {
-    console.error('[analyze] background job failed:', err instanceof Error ? err.message : err)
-  })
+
+  if (!job.image_base64 || totalAgeMs > ANALYSIS_JOB_ABSOLUTE_MAX_MS) {
+    await db.from('analysis_jobs').update({
+      status: 'failed',
+      fail_message: 'L\'analyse a pris trop de temps. Réessaie dans un instant.',
+      image_base64: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', job.id)
+    return {
+      ...job,
+      status: 'failed',
+      fail_message: 'L\'analyse a pris trop de temps. Réessaie dans un instant.',
+      image_base64: null,
+    }
+  }
+
+  console.warn('[analyze] recovering stale processing job:', job.id, 'ageMs:', ageMs)
+  await db.from('analysis_jobs').update({
+    status: 'pending',
+    updated_at: new Date().toISOString(),
+  }).eq('id', job.id).eq('status', 'processing')
+
+  return {
+    ...job,
+    status: 'pending',
+  }
 }
 
 async function persistAnalysisRecord(
@@ -530,21 +568,16 @@ async function handlePollJob(
     { auth: { persistSession: false } },
   )
 
-  const { data: jobRaw, error } = await db
-    .from('analysis_jobs')
-    .select('*')
-    .eq('id', pollJobId)
-    .maybeSingle()
+  let job = await reloadAnalysisJob(db, pollJobId)
 
-  if (error || !jobRaw) {
+  if (!job) {
     return new Response(
       JSON.stringify({ error: 'Analyse introuvable. Relance une nouvelle photo.' }),
       { status: 404, headers: { ...CORS, 'Content-Type': 'application/json' } },
     )
   }
 
-  const job = jobRaw as AnalysisJobRow
-  const ageMs = Date.now() - new Date(job.updated_at).getTime()
+  job = await recoverStaleProcessingJob(db, job)
 
   if (job.status === 'success' && job.result_json) {
     return new Response(
@@ -560,24 +593,26 @@ async function handlePollJob(
     )
   }
 
-  if (job.status === 'processing' && ageMs > ANALYSIS_JOB_STALE_MS) {
-    await db.from('analysis_jobs').update({
-      status: 'failed',
-      fail_message: 'L\'analyse a pris trop de temps. Réessaie avec une photo plus légère.',
-      image_base64: null,
-      updated_at: new Date().toISOString(),
-    }).eq('id', pollJobId)
-    return new Response(
-      JSON.stringify({
-        status: 'failed',
-        error: 'L\'analyse a pris trop de temps. Réessaie avec une photo plus légère.',
-      }),
-      { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } },
-    )
-  }
-
   if (job.status === 'pending') {
-    scheduleAnalysisJob(pollJobId, apiKey)
+    try {
+      await runAnalysisJob(pollJobId, apiKey)
+    } catch (err) {
+      console.warn('[analyze] inline poll processing error:', err instanceof Error ? err.message : err)
+    }
+
+    job = await reloadAnalysisJob(db, pollJobId)
+    if (job?.status === 'success' && job.result_json) {
+      return new Response(
+        JSON.stringify({ status: 'success', ...job.result_json }),
+        { headers: { ...CORS, 'Content-Type': 'application/json' } },
+      )
+    }
+    if (job?.status === 'failed') {
+      return new Response(
+        JSON.stringify({ status: 'failed', error: job.fail_message ?? 'Analyse échouée' }),
+        { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } },
+      )
+    }
   }
 
   return new Response(
@@ -614,7 +649,6 @@ async function handleStartAnalysis(
   }
 
   const pollJobId = jobRow.id as string
-  scheduleAnalysisJob(pollJobId, apiKey)
 
   return new Response(
     JSON.stringify({

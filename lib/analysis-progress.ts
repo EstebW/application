@@ -8,8 +8,8 @@
 
 export const ANALYSIS_FACE_MS = 8_000
 export const ANALYSIS_MATCH_MS = 18_000
-export const ANALYSIS_SLOW_MS = 45_000
-export const ANALYSIS_MAX_MS = 180_000
+export const ANALYSIS_SLOW_MS = 60_000
+export const ANALYSIS_MAX_MS = 300_000
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))

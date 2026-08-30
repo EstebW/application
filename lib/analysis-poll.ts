@@ -3,7 +3,7 @@ import type { CelebrityResult } from './types'
 import { formatAnalyzeError } from './kie-errors'
 
 export const ANALYSIS_POLL_INTERVAL_MS = 2_500
-export const ANALYSIS_POLL_TIMEOUT_MS = 180_000
+export const ANALYSIS_POLL_TIMEOUT_MS = 300_000
 
 export interface AnalysisStartResponse {
   status?: 'pending' | 'success'
@@ -73,5 +73,5 @@ export async function runAnalysisWithPolling(
     }
   }
 
-  throw new Error('L\'analyse a pris trop de temps. Réessaie — une photo plus légère aide souvent.')
+  throw new Error('L\'analyse prend plus de temps que prévu. Réessaie dans un instant.')
 }
