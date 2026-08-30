@@ -16,6 +16,10 @@ import {
   generationProgressFromElapsed,
   generationStepFromElapsed,
 } from '@/lib/generation-progress'
+import LoadingPatienceHint, {
+  LOADING_PATIENCE_HINT_MS,
+  LOADING_PATIENCE_HINTS,
+} from './LoadingPatienceHint'
 
 interface GenerationLoaderProps {
   preview: string
@@ -47,6 +51,7 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
   const [progress, setProgress] = useState(0)
   const [apiError, setApiError] = useState('')
   const [apiErrorCode, setApiErrorCode] = useState<string | undefined>()
+  const [showPatienceHint, setShowPatienceHint] = useState(false)
   const called = useRef(false)
 
   const steps = isPhotoEdit
@@ -70,6 +75,7 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
       const elapsed = Date.now() - t0
       setProgress(generationProgressFromElapsed(elapsed))
       setStepIndex(generationStepFromElapsed(elapsed))
+      if (elapsed >= LOADING_PATIENCE_HINT_MS) setShowPatienceHint(true)
     }, 250)
 
     void (async () => {
@@ -300,6 +306,11 @@ export default function GenerationLoader({ preview, imageBase64, celebrity, cele
               <span>Génération IA</span>
               <span>{Math.min(Math.round(progress), 100)}%</span>
             </div>
+
+            <LoadingPatienceHint
+              show={showPatienceHint}
+              message={LOADING_PATIENCE_HINTS.generation}
+            />
           </>
         )}
       </div>

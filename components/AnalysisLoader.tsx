@@ -11,6 +11,10 @@ import {
   analysisStepFromElapsed,
 } from '@/lib/analysis-progress'
 import { prepareAnalysisImage } from '@/lib/prepare-analysis-image'
+import LoadingPatienceHint, {
+  LOADING_PATIENCE_HINT_MS,
+  LOADING_PATIENCE_HINTS,
+} from './LoadingPatienceHint'
 
 const STEPS = [
   'Analyse morphologique de ton visage...',
@@ -39,12 +43,14 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
   const [progress, setProgress] = useState(0)
   const [apiError, setApiError] = useState('')
   const [retrying, setRetrying] = useState(false)
+  const [showPatienceHint, setShowPatienceHint] = useState(false)
   const runId = useRef(0)
 
   const runAnalysis = useCallback(async () => {
     const currentRun = ++runId.current
     setApiError('')
     setRetrying(false)
+    setShowPatienceHint(false)
     setStepIndex(0)
     setProgress(0)
 
@@ -54,6 +60,7 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
       const elapsed = Date.now() - t0
       setProgress(analysisProgressFromElapsed(elapsed))
       setStepIndex(analysisStepFromElapsed(elapsed))
+      if (elapsed >= LOADING_PATIENCE_HINT_MS) setShowPatienceHint(true)
     }, 250)
 
     try {
@@ -246,6 +253,11 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
               <span>Progression</span>
               <span>{Math.min(Math.round(progress), 100)}%</span>
             </div>
+
+            <LoadingPatienceHint
+              show={showPatienceHint}
+              message={LOADING_PATIENCE_HINTS.analysis}
+            />
           </>
         )}
       </div>
