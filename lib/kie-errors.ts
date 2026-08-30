@@ -85,6 +85,59 @@ export function formatKieError(message: string, code?: string): string {
   return message
 }
 
+/** Erreurs KIE temporaires — retry automatique possible. */
+export function isTransientKieError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('worker_resource_limit') ||
+    lower.includes('not having enough compute resources') ||
+    lower.includes('timeout') ||
+    lower.includes('timed out') ||
+    lower.includes('rate limit') ||
+    lower.includes('too many requests') ||
+    /\b429\b/.test(lower) ||
+    /\b502\b/.test(lower) ||
+    /\b503\b/.test(lower) ||
+    lower.includes('temporarily unavailable') ||
+    lower.includes('overloaded')
+  )
+}
+
+/** Messages utilisateur pour l'analyse faciale (pas la génération photo). */
+export function formatAnalyzeError(message: string, code?: string): string {
+  const lower = message.toLowerCase()
+
+  if (code === 'KIE_VENDOR_INSUFFICIENT') {
+    return 'Le service d\'analyse IA est temporairement indisponible. Réessaie un peu plus tard.'
+  }
+
+  if (
+    code === 'WORKER_RESOURCE_LIMIT' ||
+    isTransientKieError(message)
+  ) {
+    return 'Les serveurs d\'analyse sont surchargés. Réessaie dans quelques secondes.'
+  }
+
+  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('504')) {
+    return 'L\'analyse a pris trop de temps. Réessaie — une photo plus légère ou mieux cadrée aide souvent.'
+  }
+
+  if (lower.includes('visage non détecté') || lower.includes('aucun visage')) {
+    return 'Aucun visage clairement visible. Prends un selfie net, bien éclairé, visage de face.'
+  }
+
+  if (
+    lower.includes("can't help") ||
+    lower.includes("can't identify") ||
+    lower.includes('facial recognition') ||
+    lower.includes('impossible de parser')
+  ) {
+    return 'L\'analyse photo a échoué. Réessaie avec une photo plus nette, bien éclairée, où le visage est visible.'
+  }
+
+  return formatKieError(message, code)
+}
+
 export function isSensitiveContentError(message: string): boolean {
   const lower = message.toLowerCase()
   return lower.includes('422') || lower.includes('sensitive') || lower.includes('flagged')

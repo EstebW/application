@@ -1,5 +1,5 @@
 import type { CelebrityResult } from './types'
-import { formatKieError } from './kie-errors'
+import { formatAnalyzeError, isTransientKieError } from './kie-errors'
 import { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result'
 
 export { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result'
@@ -7,35 +7,9 @@ export { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-resu
 const KIE_API_BASE = 'https://api.kie.ai'
 const ANALYZE_MODEL = 'gemini-3-flash'
 const ANALYZE_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
-
-/** Température basse pour stabiliser l'analyse structurée (si supportée par kie.ai). */
 const ANALYZE_TEMPERATURE = 0.2
-
-const MORPHOLOGY_SYSTEM = `Tu es le moteur d'analyse morphologique de StarFusion.
-Tu décris UNIQUEMENT la structure visuelle du visage fourni.
-Tu ne nommes AUCUNE célébrité.
-Tu ne fais AUCUNE déduction sur l'origine ethnique, la religion, l'orientation sexuelle, la santé, les opinions politiques, la personnalité ou l'intelligence.
-Tu réponds UNIQUEMENT par un objet JSON valide, sans markdown.`
-
-const MORPHOLOGY_PROMPT = `Analyse précisément le visage sur cette photo. Ignore autant que possible coiffure, barbe, lunettes, vêtements, décor, expression, sourire, lumière et maquillage.
-
-Décris les caractéristiques STRUCTURELLES stables :
-
-Réponds UNIQUEMENT avec ce JSON :
-{
-  "faceShape": "forme globale + rapport largeur/longueur",
-  "forehead": "largeur, hauteur, structure",
-  "eyebrows": "forme, épaisseur, orientation, distance aux yeux",
-  "eyes": "forme, taille relative, espacement, orientation, ouverture, position",
-  "nose": "longueur relative, largeur, forme, projection, rapports",
-  "cheekbones": "largeur, position, définition",
-  "jawChin": "mâchoire (largeur, angle, définition) + menton (largeur, forme, projection)",
-  "mouth": "largeur, forme, proportions des lèvres, distance nez-bouche",
-  "facialProportions": "tiers du visage et rapports yeux/nez/bouche/mâchoire/menton",
-  "error": null
-}
-
-Si aucun visage exploitable : {"error":"visage non détecté"}`
+const ANALYZE_KIE_MAX_ATTEMPTS = 3
+const ANALYZE_KIE_RETRY_DELAY_MS = 1_500
 
 const MATCH_SYSTEM = `Tu es le moteur d'analyse morphologique de StarFusion.
 
@@ -60,9 +34,7 @@ Aucune inférence sensible (ethnicité, religion, santé, etc.).
 
 Réponds UNIQUEMENT par un objet JSON valide, sans markdown.`
 
-function buildMatchPrompt(faceAnalysisJson: string): string {
-  return `Voici l'analyse morphologique déjà établie du visage utilisateur (à respecter comme base) :
-${faceAnalysisJson}
+const COMBINED_ANALYZE_PROMPT = `Analyse d'abord en interne la structure faciale stable sur cette photo (forme, yeux, nez, mâchoire, proportions — ignore coiffure, barbe, lunettes, vêtements, décor, expression, lumière).
 
 En t'appuyant sur cette analyse ET sur la photo, trouve les 3 célébrités (vraies personnalités identifiables) dont la structure faciale colle le mieux.
 
@@ -103,7 +75,6 @@ Règles :
 - strongestSimilarities : 3 traits STRUCTURELS précis
 - mainDifferences : 1 à 3 différences structurelles
 - si aucun visage : {"error":"visage non détecté"}`
-}
 
 type ChatMessage =
   | { role: 'system' | 'user' | 'assistant'; content: string }
@@ -158,6 +129,10 @@ function extractTextFromResponse(data: unknown): string {
   return ''
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function callKieVision(messages: ChatMessage[], apiKey: string): Promise<string> {
   const res = await fetch(`${KIE_API_BASE}${ANALYZE_ENDPOINT}`, {
     method: 'POST',
@@ -168,7 +143,7 @@ async function callKieVision(messages: ChatMessage[], apiKey: string): Promise<s
     body: JSON.stringify({
       messages,
       stream: false,
-      reasoning_effort: 'medium',
+      reasoning_effort: 'low',
       temperature: ANALYZE_TEMPERATURE,
     }),
   })
@@ -178,18 +153,18 @@ async function callKieVision(messages: ChatMessage[], apiKey: string): Promise<s
   try {
     data = JSON.parse(bodyText)
   } catch {
-    throw new Error(formatKieError(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${bodyText}`))
+    throw new Error(formatAnalyzeError(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${bodyText}`))
   }
 
   if (!res.ok) {
     const err = data as { error?: { message?: string }; msg?: string }
     const message = err.error?.message ?? err.msg ?? bodyText
-    throw new Error(formatKieError(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${message}`))
+    throw new Error(formatAnalyzeError(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${message}`))
   }
 
   const parsed = data as { code?: number; msg?: string }
   if (typeof parsed.code === 'number' && parsed.code !== 200) {
-    throw new Error(formatKieError(`kie.ai ${ANALYZE_MODEL} — ${parsed.msg ?? 'erreur'}`))
+    throw new Error(formatAnalyzeError(`kie.ai ${ANALYZE_MODEL} — ${parsed.msg ?? 'erreur'}`))
   }
 
   const raw = extractTextFromResponse(data)
@@ -201,13 +176,28 @@ async function callKieVision(messages: ChatMessage[], apiKey: string): Promise<s
   return raw
 }
 
+async function callKieVisionWithRetry(messages: ChatMessage[], apiKey: string): Promise<string> {
+  let lastErr: Error | undefined
+  for (let attempt = 1; attempt <= ANALYZE_KIE_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callKieVision(messages, apiKey)
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err))
+      const transient = isTransientKieError(lastErr.message)
+      if (!transient || attempt === ANALYZE_KIE_MAX_ATTEMPTS) throw lastErr
+      await delay(ANALYZE_KIE_RETRY_DELAY_MS * attempt)
+    }
+  }
+  throw lastErr ?? new Error('Analyse interrompue')
+}
+
 async function callWithOptionalRetry(
   messages: ChatMessage[],
   apiKey: string,
   label: string,
 ): Promise<Record<string, unknown>> {
   try {
-    const raw = await callKieVision(messages, apiKey)
+    const raw = await callKieVisionWithRetry(messages, apiKey)
     if (process.env.NODE_ENV === 'development') {
       console.log(`[analyze] ${label} raw:`, raw.slice(0, 1200))
     }
@@ -221,7 +211,7 @@ async function callWithOptionalRetry(
       },
     ]
     try {
-      const raw = await callKieVision(retryMessages, apiKey)
+      const raw = await callKieVisionWithRetry(retryMessages, apiKey)
       return extractJsonObject(raw)
     } catch {
       throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
@@ -241,39 +231,24 @@ export async function analyzeCelebrityFace(
 ): Promise<CelebrityResult> {
   const imageUrl = toDataUrl(imageBase64)
 
-  const morphologyParsed = await callWithOptionalRetry(
-    [
-      { role: 'system', content: MORPHOLOGY_SYSTEM },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: MORPHOLOGY_PROMPT },
-          { type: 'image_url', image_url: { url: imageUrl } },
-        ],
-      },
-    ],
-    apiKey,
-    'morphology',
-  )
-
-  if (typeof morphologyParsed.error === 'string' && morphologyParsed.error) {
-    throw new Error(`Analyse : ${morphologyParsed.error}`)
-  }
-
-  const matchParsed = await callWithOptionalRetry(
+  const parsed = await callWithOptionalRetry(
     [
       { role: 'system', content: MATCH_SYSTEM },
       {
         role: 'user',
         content: [
-          { type: 'text', text: buildMatchPrompt(JSON.stringify(morphologyParsed)) },
+          { type: 'text', text: COMBINED_ANALYZE_PROMPT },
           { type: 'image_url', image_url: { url: imageUrl } },
         ],
       },
     ],
     apiKey,
-    'match',
+    'combined',
   )
 
-  return buildCelebrityResultFromAnalysis(matchParsed)
+  if (typeof parsed.error === 'string' && parsed.error) {
+    throw new Error(`Analyse : ${parsed.error}`)
+  }
+
+  return buildCelebrityResultFromAnalysis(parsed)
 }

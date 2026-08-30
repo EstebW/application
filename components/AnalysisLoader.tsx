@@ -1,15 +1,16 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ProgressBar from './ProgressBar'
 import type { CelebrityResult } from '@/lib/types'
-import { callFunction } from '@/lib/functions'
-import { formatKieError } from '@/lib/kie-errors'
+import { callFunction, FunctionCallError } from '@/lib/functions'
+import { formatAnalyzeError, isTransientKieError } from '@/lib/kie-errors'
 import {
   analysisProgressFromElapsed,
   analysisStepFromElapsed,
 } from '@/lib/analysis-progress'
+import { prepareAnalysisImage } from '@/lib/prepare-analysis-image'
 
 const STEPS = [
   'Analyse morphologique de ton visage...',
@@ -17,6 +18,9 @@ const STEPS = [
   'Classement des meilleures ressemblances...',
   'Ton jumeau vient d\'être trouvé !',
 ]
+
+const CLIENT_MAX_ATTEMPTS = 2
+const CLIENT_RETRY_DELAY_MS = 2_000
 
 interface AnalysisLoaderProps {
   preview: string
@@ -26,59 +30,96 @@ interface AnalysisLoaderProps {
   onComplete: (result: CelebrityResult & { analysisId?: string }) => void
 }
 
+function parseAnalysisError(err: unknown): string {
+  if (err instanceof FunctionCallError) {
+    return formatAnalyzeError(err.message, err.code)
+  }
+  const raw = err instanceof Error ? err.message : 'Erreur inconnue'
+  try {
+    const parsed = JSON.parse(raw) as { error?: string }
+    if (parsed.error) return formatAnalyzeError(parsed.error)
+  } catch {
+    // pas du JSON
+  }
+  return formatAnalyzeError(raw)
+}
+
 export default function AnalysisLoader({ preview, imageBase64, sessionId, userId, onComplete }: AnalysisLoaderProps) {
   const [stepIndex, setStepIndex] = useState(0)
   const [progress, setProgress] = useState(0)
   const [apiError, setApiError] = useState('')
-  const called = useRef(false)
+  const [retrying, setRetrying] = useState(false)
+  const runId = useRef(0)
 
-  useEffect(() => {
-    if (called.current) return
-    called.current = true
+  const runAnalysis = useCallback(async () => {
+    const currentRun = ++runId.current
+    setApiError('')
+    setRetrying(false)
+    setStepIndex(0)
+    setProgress(0)
 
     const t0 = Date.now()
     const progressInterval = setInterval(() => {
+      if (runId.current !== currentRun) return
       const elapsed = Date.now() - t0
       setProgress(analysisProgressFromElapsed(elapsed))
       setStepIndex(analysisStepFromElapsed(elapsed))
     }, 250)
 
-    callFunction<CelebrityResult & { analysisId?: string; error?: string }>(
-      'analyze',
-      { imageBase64, sessionId, userId }
-    )
-      .then((data) => {
-        clearInterval(progressInterval)
+    try {
+      const preparedImage = await prepareAnalysisImage(imageBase64)
+      let lastErr: unknown
 
-        if (data.error) {
-          throw new Error(data.error)
+      for (let attempt = 1; attempt <= CLIENT_MAX_ATTEMPTS; attempt++) {
+        if (runId.current !== currentRun) return
+        if (attempt > 1) {
+          setRetrying(true)
+          await new Promise((r) => setTimeout(r, CLIENT_RETRY_DELAY_MS))
         }
 
-        setStepIndex(analysisStepFromElapsed(Date.now() - t0, true))
-        setProgress(100)
-        setTimeout(() => onComplete(data), 700)
-      })
-      .catch((err: unknown) => {
-        clearInterval(progressInterval)
-        const raw = err instanceof Error ? err.message : 'Erreur inconnue'
-        // callFunction peut renvoyer du JSON stringifié
         try {
-          const parsed = JSON.parse(raw) as { error?: string }
-          if (parsed.error) {
-            setApiError(formatKieError(parsed.error))
-            return
-          }
-        } catch {
-          // pas du JSON
-        }
-        setApiError(formatKieError(raw))
-      })
+          const data = await callFunction<CelebrityResult & { analysisId?: string; error?: string }>(
+            'analyze',
+            { imageBase64: preparedImage, sessionId, userId },
+          )
 
-    return () => {
+          if (runId.current !== currentRun) return
+          if (data.error) throw new Error(data.error)
+
+          clearInterval(progressInterval)
+          setRetrying(false)
+          setStepIndex(analysisStepFromElapsed(Date.now() - t0, true))
+          setProgress(100)
+          setTimeout(() => onComplete(data), 700)
+          return
+        } catch (err) {
+          lastErr = err
+          const message = parseAnalysisError(err)
+          const transient = isTransientKieError(message) || (
+            err instanceof FunctionCallError && (err.status === 502 || err.status === 503 || err.status === 504)
+          )
+          if (!transient || attempt === CLIENT_MAX_ATTEMPTS) break
+        }
+      }
+
+      if (runId.current !== currentRun) return
       clearInterval(progressInterval)
+      setRetrying(false)
+      setApiError(parseAnalysisError(lastErr))
+    } catch (err) {
+      if (runId.current !== currentRun) return
+      clearInterval(progressInterval)
+      setRetrying(false)
+      setApiError(parseAnalysisError(err))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [imageBase64, onComplete, sessionId, userId])
+
+  useEffect(() => {
+    void runAnalysis()
+    return () => {
+      runId.current += 1
+    }
+  }, [runAnalysis])
 
   return (
     <motion.div
@@ -177,13 +218,20 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
             <p className="text-[#A0A0A0] text-xs leading-relaxed max-w-xs mx-auto">
               {apiError}
             </p>
+            <button
+              type="button"
+              onClick={() => void runAnalysis()}
+              className="mt-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-[#D4AF37] border border-[#D4AF37]/40 hover:bg-[#D4AF37]/10 transition-colors"
+            >
+              Réessayer l&apos;analyse
+            </button>
           </div>
         ) : (
           <>
             <div className="h-10 flex items-center justify-center">
               <AnimatePresence mode="wait">
                 <motion.p
-                  key={stepIndex}
+                  key={retrying ? 'retry' : stepIndex}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -12 }}
@@ -192,7 +240,7 @@ export default function AnalysisLoader({ preview, imageBase64, sessionId, userId
                     stepIndex === STEPS.length - 1 ? 'text-[#D4AF37]' : 'text-white'
                   }`}
                 >
-                  {STEPS[stepIndex]}
+                  {retrying ? 'Serveurs chargés — nouvel essai...' : STEPS[stepIndex]}
                 </motion.p>
               </AnimatePresence>
             </div>

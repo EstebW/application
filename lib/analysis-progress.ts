@@ -1,7 +1,7 @@
 /**
  * Pourcentage affiché pendant l’analyse faciale.
  *
- * L’edge `analyze` enchaîne deux appels Gemini (morphologie, puis match)
+ * L’edge `analyze` appelle Gemini (morphologie + match combinés)
  * sans renvoyer de %. Le seul signal fiable est le temps déjà passé sur
  * la requête. 100 % uniquement quand le jumeau est vraiment calculé.
  */
