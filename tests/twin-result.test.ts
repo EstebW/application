@@ -11,6 +11,7 @@ import {
   buildExplanationFromSimilarities,
   type FeatureScores,
 } from '../lib/twin-score.ts'
+import { buildCelebrityResultFromAnalysis } from '../lib/twin-result.ts'
 
 function extractJsonObject(text: string): Record<string, unknown> {
   const cleaned = text.trim()
@@ -110,5 +111,28 @@ describe('twin result assembly', () => {
     assert.throws(() => buildFromCandidates({
       candidates: [{ name: 'X', featureScores: { eyes: 90 }, strongestSimilarities: ['a'] }],
     }))
+  })
+
+  it('accepte snake_case et scores string via buildCelebrityResultFromAnalysis', () => {
+    const result = buildCelebrityResultFromAnalysis({
+      candidates: [{
+        name: 'Jean Dujardin',
+        celebrity_domain: 'Acteur',
+        feature_scores: {
+          face_shape: '88',
+          eyes: 91,
+          eyebrows: 78,
+          nose: 81,
+          jaw_chin: 85,
+          cheekbones: 84,
+          mouth: 74,
+          facial_proportions: 90,
+        },
+        strongest_similarities: ['yeux', 'mâchoire', 'proportions'],
+        main_differences: ['nez'],
+      }],
+    })
+    assert.equal(result.name, 'Jean Dujardin')
+    assert.ok(result.score > 0)
   })
 })

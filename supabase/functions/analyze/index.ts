@@ -40,6 +40,10 @@ const STARFUSION_SCORE_WEIGHTS: Record<FeatureScoreKey, number> = {
 }
 
 function clampScore(value: unknown): number | null {
+  if (typeof value === 'string' && value.trim()) {
+    const n = Number(value)
+    if (Number.isFinite(n)) return Math.max(0, Math.min(100, n))
+  }
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   return Math.max(0, Math.min(100, value))
 }
@@ -189,9 +193,55 @@ function toDataUrl(base64: string): string {
 function extractTextFromResponse(data: unknown): string {
   if (!data || typeof data !== 'object') return ''
   const d = data as Record<string, unknown>
-  const choices = d.choices as Array<{ message?: { content?: string } }> | undefined
-  if (choices?.[0]?.message?.content) return choices[0].message.content
-  if (typeof d.text === 'string') return d.text
+
+  const messageContentToString = (content: unknown): string => {
+    if (typeof content === 'string') return content
+    if (Array.isArray(content)) {
+      return content
+        .map((block) => {
+          if (!block || typeof block !== 'object') return ''
+          const b = block as Record<string, unknown>
+          if (typeof b.text === 'string') return b.text
+          if (typeof b.content === 'string') return b.content
+          return ''
+        })
+        .filter(Boolean)
+        .join('\n')
+    }
+    if (content && typeof content === 'object') {
+      const c = content as Record<string, unknown>
+      if (typeof c.text === 'string') return c.text
+    }
+    return ''
+  }
+
+  const choices = d.choices as Array<{ message?: { content?: unknown } }> | undefined
+  if (choices?.[0]?.message?.content != null) {
+    const text = messageContentToString(choices[0].message.content)
+    if (text) return text
+  }
+
+  const candidates = d.candidates as Array<{ content?: { parts?: Array<{ text?: string }> } }> | undefined
+  if (candidates?.[0]?.content?.parts?.length) {
+    const text = candidates[0].content.parts
+      .map((p) => p?.text ?? '')
+      .filter(Boolean)
+      .join('\n')
+    if (text) return text
+  }
+
+  if (typeof d.text === 'string' && d.text) return d.text
+  if (typeof d.output === 'string' && d.output) return d.output
+  if (typeof d.result === 'string' && d.result) return d.result
+
+  if (typeof d.data === 'string' && d.data.trim()) {
+    try {
+      return extractTextFromResponse(JSON.parse(d.data))
+    } catch {
+      return d.data
+    }
+  }
+
   if (d.data && typeof d.data === 'object') return extractTextFromResponse(d.data)
   return ''
 }
@@ -211,6 +261,9 @@ function extractJsonObject(text: string): Record<string, unknown> {
   const end = cleaned.lastIndexOf('}')
   if (start >= 0 && end > start) {
     return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>
+  }
+  if (/can't help|can't identify|cannot identify|facial recognition|i don't do|refus/i.test(cleaned)) {
+    throw new Error('L\'IA a refusé l\'analyse. Réessaie avec une autre photo.')
   }
   throw new Error('Impossible de parser la réponse du modèle')
 }
@@ -270,7 +323,10 @@ async function callKieVision(messages: unknown[], apiKey: string): Promise<strin
   }
 
   const raw = extractTextFromResponse(data)
-  if (!raw) throw new Error('Réponse vide du modèle')
+  if (!raw) {
+    console.error('[analyze] empty model text, response preview:', bodyText.slice(0, 800))
+    throw new Error('Réponse vide du modèle')
+  }
   return raw
 }
 
@@ -323,6 +379,29 @@ function parseStringList(raw: unknown, max = 5): string[] {
     .slice(0, max)
 }
 
+function readField(obj: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (obj[key] !== undefined && obj[key] !== null) return obj[key]
+  }
+  return undefined
+}
+
+function normalizeFeatureScoresInput(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw
+  const obj = raw as Record<string, unknown>
+  const aliases: Record<string, FeatureScoreKey> = {
+    face_shape: 'faceShape',
+    facial_proportions: 'facialProportions',
+    jaw_chin: 'jawChin',
+    cheek_bones: 'cheekbones',
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    out[aliases[key] ?? key] = value
+  }
+  return out
+}
+
 function buildCelebrityResult(parsed: Record<string, unknown>) {
   if (typeof parsed.error === 'string') throw new Error(`Analyse : ${parsed.error}`)
 
@@ -343,24 +422,35 @@ function buildCelebrityResult(parsed: Record<string, unknown>) {
   for (const item of list) {
     if (!item || typeof item !== 'object') continue
     const c = item as Record<string, unknown>
-    const name = typeof c.name === 'string' ? c.name.trim() : ''
+    const nameRaw = readField(c, 'name', 'celebrity_name', 'celebrityName')
+    const name = typeof nameRaw === 'string' ? nameRaw.trim() : ''
     if (!name) continue
-    const featureScores = parseFeatureScores(c.featureScores)
+    const featureScores = parseFeatureScores(
+      normalizeFeatureScoresInput(readField(c, 'featureScores', 'feature_scores')),
+    )
     if (!featureScores) continue
-    const strongestSimilarities = parseStringList(c.strongestSimilarities, 3)
+    const strongestSimilarities = parseStringList(
+      readField(c, 'strongestSimilarities', 'strongest_similarities', 'similarities'),
+      3,
+    )
     if (strongestSimilarities.length === 0) continue
     rawCandidates.push({
       name,
-      celebrity_domain: typeof c.celebrity_domain === 'string' ? c.celebrity_domain.trim() : '',
-      celebrity_style_description:
-        typeof c.celebrity_style_description === 'string' ? c.celebrity_style_description.trim() : '',
+      celebrity_domain: String(readField(c, 'celebrity_domain', 'celebrityDomain', 'domain') ?? '').trim(),
+      celebrity_style_description: String(
+        readField(c, 'celebrity_style_description', 'celebrityStyleDescription', 'style_description') ?? '',
+      ).trim(),
       featureScores,
       strongestSimilarities,
-      mainDifferences: parseStringList(c.mainDifferences, 3),
+      mainDifferences: parseStringList(
+        readField(c, 'mainDifferences', 'main_differences', 'differences'),
+        3,
+      ),
     })
   }
 
   if (rawCandidates.length === 0) {
+    console.warn('[analyze] no valid candidates after validation:', JSON.stringify(parsed).slice(0, 800))
     throw new Error('Aucun candidat valide après validation des sous-scores')
   }
 

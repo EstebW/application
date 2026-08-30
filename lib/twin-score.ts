@@ -42,6 +42,10 @@ export const FEATURE_SCORE_LABELS_FR: Record<FeatureScoreKey, string> = {
 }
 
 export function clampScore(value: unknown): number | null {
+  if (typeof value === 'string' && value.trim()) {
+    const n = Number(value)
+    if (Number.isFinite(n)) return Math.max(0, Math.min(100, n))
+  }
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   return Math.max(0, Math.min(100, value))
 }

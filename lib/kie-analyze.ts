@@ -1,6 +1,7 @@
 import type { CelebrityResult } from './types'
-import { formatAnalyzeError, isTransientKieError } from './kie-errors'
-import { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result'
+import { formatAnalyzeError, isTransientKieError } from './kie-errors.ts'
+import { extractTextFromVisionResponse } from './kie-vision-response.ts'
+import { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result.ts'
 
 export { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result'
 
@@ -103,30 +104,7 @@ function toDataUrl(base64: string): string {
 }
 
 function extractTextFromResponse(data: unknown): string {
-  if (!data || typeof data !== 'object') return ''
-
-  const d = data as Record<string, unknown>
-
-  const choices = d.choices as Array<{ message?: { content?: string } }> | undefined
-  if (choices?.[0]?.message?.content) return choices[0].message.content
-
-  const content = d.content
-  if (Array.isArray(content)) {
-    const parts = content
-      .map((block) => {
-        if (!block || typeof block !== 'object') return ''
-        const b = block as { type?: string; text?: string }
-        if (b.type === 'text' && typeof b.text === 'string') return b.text
-        return ''
-      })
-      .filter(Boolean)
-    if (parts.length) return parts.join('\n')
-  }
-
-  if (typeof d.text === 'string') return d.text
-  if (d.data && typeof d.data === 'object') return extractTextFromResponse(d.data)
-
-  return ''
+  return extractTextFromVisionResponse(data)
 }
 
 function delay(ms: number): Promise<void> {

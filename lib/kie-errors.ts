@@ -130,9 +130,15 @@ export function formatAnalyzeError(message: string, code?: string): string {
     lower.includes("can't help") ||
     lower.includes("can't identify") ||
     lower.includes('facial recognition') ||
-    lower.includes('impossible de parser')
+    lower.includes('impossible de parser') ||
+    lower.includes('réponse vide du modèle') ||
+    lower.includes('aucun candidat valide')
   ) {
     return 'L\'analyse photo a échoué. Réessaie avec une photo plus nette, bien éclairée, où le visage est visible.'
+  }
+
+  if (lower.includes('l\'ia a refusé l\'analyse')) {
+    return 'L\'IA n\'a pas pu analyser cette photo. Réessaie avec un selfie net, visage bien visible.'
   }
 
   return formatKieError(message, code)

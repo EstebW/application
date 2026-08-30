@@ -1,10 +1,11 @@
-import type { CelebrityResult, TwinRunnerUp } from './types'
+import type { CelebrityResult, TwinRunnerUp } from './types.ts'
 import {
   buildExplanationFromSimilarities,
   parseFeatureScores,
   rankCandidatesByScore,
+  type FeatureScoreKey,
   type FeatureScores,
-} from './twin-score'
+} from './twin-score.ts'
 
 export function extractJsonObject(text: string): Record<string, unknown> {
   const cleaned = text.trim()
@@ -54,6 +55,30 @@ interface RawCandidate {
   mainDifferences: string[]
 }
 
+function readField(obj: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (obj[key] !== undefined && obj[key] !== null) return obj[key]
+  }
+  return undefined
+}
+
+function normalizeFeatureScoresInput(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw
+  const obj = raw as Record<string, unknown>
+  const aliases: Record<string, FeatureScoreKey> = {
+    face_shape: 'faceShape',
+    facial_proportions: 'facialProportions',
+    jaw_chin: 'jawChin',
+    cheek_bones: 'cheekbones',
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    const normalizedKey = aliases[key] ?? key
+    out[normalizedKey] = value
+  }
+  return out
+}
+
 function parseCandidates(parsed: Record<string, unknown>): RawCandidate[] {
   if (typeof parsed.error === 'string') {
     throw new Error(`Analyse : ${parsed.error}`)
@@ -68,20 +93,30 @@ function parseCandidates(parsed: Record<string, unknown>): RawCandidate[] {
   for (const item of list) {
     if (!item || typeof item !== 'object') continue
     const c = item as Record<string, unknown>
-    const name = typeof c.name === 'string' ? c.name.trim() : ''
+    const nameRaw = readField(c, 'name', 'celebrity_name', 'celebrityName')
+    const name = typeof nameRaw === 'string' ? nameRaw.trim() : ''
     if (!name) continue
-    const featureScores = parseFeatureScores(c.featureScores)
+    const featureScores = parseFeatureScores(
+      normalizeFeatureScoresInput(readField(c, 'featureScores', 'feature_scores')),
+    )
     if (!featureScores) continue
 
-    const strongestSimilarities = parseStringList(c.strongestSimilarities, 3)
-    const mainDifferences = parseStringList(c.mainDifferences, 3)
+    const strongestSimilarities = parseStringList(
+      readField(c, 'strongestSimilarities', 'strongest_similarities', 'similarities'),
+      3,
+    )
+    const mainDifferences = parseStringList(
+      readField(c, 'mainDifferences', 'main_differences', 'differences'),
+      3,
+    )
     if (strongestSimilarities.length === 0) continue
 
     out.push({
       name,
-      celebrity_domain: typeof c.celebrity_domain === 'string' ? c.celebrity_domain.trim() : '',
-      celebrity_style_description:
-        typeof c.celebrity_style_description === 'string' ? c.celebrity_style_description.trim() : '',
+      celebrity_domain: String(readField(c, 'celebrity_domain', 'celebrityDomain', 'domain') ?? '').trim(),
+      celebrity_style_description: String(
+        readField(c, 'celebrity_style_description', 'celebrityStyleDescription', 'style_description') ?? '',
+      ).trim(),
       featureScores,
       strongestSimilarities,
       mainDifferences,

@@ -37,6 +37,13 @@ describe('twin-score', () => {
     assert.equal(parseFeatureScores({ faceShape: 50 }), null)
     assert.deepEqual(
       parseFeatureScores({
+        ...sampleScores(),
+        eyes: '91',
+      }),
+      sampleScores({ eyes: 91 }),
+    )
+    assert.deepEqual(
+      parseFeatureScores({
         ...sampleScores({ eyes: 150, mouth: -5 }),
       }),
       sampleScores({ eyes: 100, mouth: 0 }),
