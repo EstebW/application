@@ -32,11 +32,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'imageBase64 requis' }, { status: 400 })
     }
 
-    const kieKey = process.env.KIE_API_KEY?.trim()
+    const geminiKey = process.env.GEMINI_API_KEY?.trim()
 
     let result
-    if (kieKey) {
-      result = await analyzeCelebrityFace(imageBase64, kieKey)
+    if (geminiKey) {
+      result = await analyzeCelebrityFace(imageBase64, geminiKey)
     } else {
       result = await callSupabaseAnalyze({ imageBase64, sessionId })
       return NextResponse.json(result)

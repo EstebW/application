@@ -1,18 +1,14 @@
 import type { CelebrityResult } from './types'
-import { formatAnalyzeError, isTransientKieError } from './kie-errors.ts'
-import { extractTextFromVisionResponse } from './kie-vision-response.ts'
+import { isTransientKieError } from './kie-errors.ts'
 import { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result.ts'
+import {
+  callGoogleGeminiAnalyze,
+  resolveAnalysisGeminiModel,
+} from './google-gemini-analyze.ts'
 
-export { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result'
+export { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result.ts'
 
-const KIE_API_BASE = 'https://api.kie.ai'
-const ANALYZE_MODEL = 'gemini-3-flash'
-const ANALYZE_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
-const ANALYZE_TEMPERATURE = 0.2
-const ANALYZE_KIE_MAX_ATTEMPTS = 2
-const ANALYZE_KIE_RETRY_DELAY_MS = 1_500
-
-const MATCH_SYSTEM = `Tu es le moteur d'analyse morphologique de StarFusion.
+export const MATCH_SYSTEM = `Tu es le moteur d'analyse morphologique de StarFusion.
 
 Ton objectif est d'identifier les célébrités dont la STRUCTURE FACIALE ressemble le plus au visage fourni.
 
@@ -35,7 +31,7 @@ Aucune inférence sensible (ethnicité, religion, santé, etc.).
 
 Réponds UNIQUEMENT par un objet JSON valide, sans markdown.`
 
-const COMBINED_ANALYZE_PROMPT = `Analyse d'abord en interne la structure faciale stable sur cette photo (forme, yeux, nez, mâchoire, proportions — ignore coiffure, barbe, lunettes, vêtements, décor, expression, lumière).
+export const COMBINED_ANALYZE_PROMPT = `Analyse d'abord en interne la structure faciale stable sur cette photo (forme, yeux, nez, mâchoire, proportions — ignore coiffure, barbe, lunettes, vêtements, décor, expression, lumière).
 
 En t'appuyant sur cette analyse ET sur la photo, trouve les 3 célébrités (vraies personnalités identifiables) dont la structure faciale colle le mieux.
 
@@ -77,104 +73,54 @@ Règles :
 - mainDifferences : 1 à 3 différences structurelles
 - si aucun visage : {"error":"visage non détecté"}`
 
-type ChatMessage =
-  | { role: 'system' | 'user' | 'assistant'; content: string }
-  | {
-      role: 'user'
-      content: Array<
-        | { type: 'text'; text: string }
-        | { type: 'image_url'; image_url: { url: string } }
-      >
-    }
-
-function toRawBase64(base64: string) {
-  return base64.replace(/^data:image\/\w+;base64,/, '')
-}
-
-function getMime(base64: string): 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' {
-  if (base64.startsWith('data:image/png')) return 'image/png'
-  if (base64.startsWith('data:image/webp')) return 'image/webp'
-  if (base64.startsWith('data:image/gif')) return 'image/gif'
-  return 'image/jpeg'
-}
-
-function toDataUrl(base64: string): string {
-  if (base64.startsWith('data:')) return base64
-  return `data:${getMime(base64)};base64,${toRawBase64(base64)}`
-}
-
-function extractTextFromResponse(data: unknown): string {
-  return extractTextFromVisionResponse(data)
-}
+const ANALYZE_TEMPERATURE = 0.2
+const ANALYZE_MAX_ATTEMPTS = 2
+const ANALYZE_RETRY_DELAY_MS = 1_500
+const ANALYZE_JSON_RETRY_TEXT =
+  'Ta réponse précédente était invalide. Renvoie UNIQUEMENT l\'objet JSON demandé, sans markdown ni texte autour.'
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function callKieVision(messages: ChatMessage[], apiKey: string): Promise<string> {
-  const res = await fetch(`${KIE_API_BASE}${ANALYZE_ENDPOINT}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      messages,
-      stream: false,
-      temperature: ANALYZE_TEMPERATURE,
-    }),
+async function callGeminiVision(
+  imageBase64: string,
+  apiKey: string,
+  extraUserText?: string,
+): Promise<string> {
+  return await callGoogleGeminiAnalyze({
+    systemInstruction: MATCH_SYSTEM,
+    userText: COMBINED_ANALYZE_PROMPT,
+    imageBase64,
+    extraUserText,
+    apiKey,
+    model: resolveAnalysisGeminiModel(),
+    temperature: ANALYZE_TEMPERATURE,
   })
-
-  const bodyText = await res.text()
-  let data: unknown
-  try {
-    data = JSON.parse(bodyText)
-  } catch {
-    throw new Error(formatAnalyzeError(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${bodyText}`))
-  }
-
-  if (!res.ok) {
-    const err = data as { error?: { message?: string }; msg?: string }
-    const message = err.error?.message ?? err.msg ?? bodyText
-    throw new Error(formatAnalyzeError(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${message}`))
-  }
-
-  const parsed = data as { code?: number; msg?: string }
-  if (typeof parsed.code === 'number' && parsed.code !== 200) {
-    throw new Error(formatAnalyzeError(`kie.ai ${ANALYZE_MODEL} — ${parsed.msg ?? 'erreur'}`))
-  }
-
-  const raw = extractTextFromResponse(data)
-  if (!raw) {
-    console.error('[analyze] unexpected response shape:', bodyText.slice(0, 500))
-    throw new Error('Réponse vide du modèle')
-  }
-
-  return raw
 }
 
-async function callKieVisionWithRetry(messages: ChatMessage[], apiKey: string): Promise<string> {
+async function callGeminiVisionWithRetry(imageBase64: string, apiKey: string): Promise<string> {
   let lastErr: Error | undefined
-  for (let attempt = 1; attempt <= ANALYZE_KIE_MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= ANALYZE_MAX_ATTEMPTS; attempt++) {
     try {
-      return await callKieVision(messages, apiKey)
+      return await callGeminiVision(imageBase64, apiKey)
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err))
       const transient = isTransientKieError(lastErr.message)
-      if (!transient || attempt === ANALYZE_KIE_MAX_ATTEMPTS) throw lastErr
-      await delay(ANALYZE_KIE_RETRY_DELAY_MS * attempt)
+      if (!transient || attempt === ANALYZE_MAX_ATTEMPTS) throw lastErr
+      await delay(ANALYZE_RETRY_DELAY_MS * attempt)
     }
   }
   throw lastErr ?? new Error('Analyse interrompue')
 }
 
 async function callWithOptionalRetry(
-  messages: ChatMessage[],
+  imageBase64: string,
   apiKey: string,
   label: string,
 ): Promise<Record<string, unknown>> {
   try {
-    const raw = await callKieVisionWithRetry(messages, apiKey)
+    const raw = await callGeminiVisionWithRetry(imageBase64, apiKey)
     if (process.env.NODE_ENV === 'development') {
       console.log(`[analyze] ${label} raw:`, raw.slice(0, 1200))
     }
@@ -184,15 +130,8 @@ async function callWithOptionalRetry(
     if (isTransientKieError(firstMessage)) {
       throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
     }
-    const retryMessages: ChatMessage[] = [
-      ...messages,
-      {
-        role: 'user',
-        content: 'Ta réponse précédente était invalide. Renvoie UNIQUEMENT l\'objet JSON demandé, sans markdown ni texte autour.',
-      },
-    ]
     try {
-      const raw = await callKieVision(retryMessages, apiKey)
+      const raw = await callGeminiVision(imageBase64, apiKey, ANALYZE_JSON_RETRY_TEXT)
       return extractJsonObject(raw)
     } catch {
       throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
@@ -210,22 +149,7 @@ export async function analyzeCelebrityFace(
   imageBase64: string,
   apiKey: string
 ): Promise<CelebrityResult> {
-  const imageUrl = toDataUrl(imageBase64)
-
-  const parsed = await callWithOptionalRetry(
-    [
-      { role: 'system', content: MATCH_SYSTEM },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: COMBINED_ANALYZE_PROMPT },
-          { type: 'image_url', image_url: { url: imageUrl } },
-        ],
-      },
-    ],
-    apiKey,
-    'combined',
-  )
+  const parsed = await callWithOptionalRetry(imageBase64, apiKey, 'combined')
 
   if (typeof parsed.error === 'string' && parsed.error) {
     throw new Error(`Analyse : ${parsed.error}`)

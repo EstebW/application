@@ -5,12 +5,14 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const KIE_API_BASE = 'https://api.kie.ai'
-const ANALYZE_MODEL = 'gemini-3-flash'
-const ANALYZE_ENDPOINT = '/gemini-3-flash/v1/chat/completions'
+const GOOGLE_GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+const DEFAULT_ANALYSIS_GEMINI_MODEL = 'gemini-3.7-flash'
+const ANALYSIS_PROVIDER = 'google_direct'
 const ANALYZE_TEMPERATURE = 0.2
-const ANALYZE_KIE_MAX_ATTEMPTS = 2
-const ANALYZE_KIE_RETRY_DELAY_MS = 1_500
+const ANALYZE_MAX_ATTEMPTS = 2
+const ANALYZE_RETRY_DELAY_MS = 1_500
+const ANALYZE_JSON_RETRY_TEXT =
+  'Ta réponse précédente était invalide. Renvoie UNIQUEMENT l\'objet JSON demandé, sans markdown ni texte autour.'
 const ANALYSIS_POLL_INTERVAL_MS = 2_500
 const ANALYSIS_POLL_TIMEOUT_MS = 300_000
 const ANALYSIS_JOB_RETRY_MS = 90_000
@@ -177,7 +179,7 @@ Règles :
 - mainDifferences : 1 à 3 différences structurelles
 - si aucun visage : {"error":"visage non détecté"}`
 
-// ── Helpers kie.ai ──────────────────────────────────────────────────────────
+// ── Helpers image + Gemini Google (transport uniquement) ────────────────────
 
 function toRawBase64(base64: string) {
   return base64.replace(/^data:image\/\w+;base64,/, '')
@@ -190,9 +192,23 @@ function getMime(base64: string): 'image/jpeg' | 'image/png' | 'image/webp' | 'i
   return 'image/jpeg'
 }
 
-function toDataUrl(base64: string): string {
-  if (base64.startsWith('data:')) return base64
-  return `data:${getMime(base64)};base64,${toRawBase64(base64)}`
+function resolveAnalysisGeminiModel(): string {
+  const raw = Deno.env.get('ANALYSIS_GEMINI_MODEL')?.trim()
+  return raw || DEFAULT_ANALYSIS_GEMINI_MODEL
+}
+
+function redactSecrets(text: string): string {
+  return text
+    .replace(/AIza[0-9A-Za-z_-]{10,}/g, 'REDACTED')
+    .replace(/key=[^&\s"']+/gi, 'key=REDACTED')
+}
+
+function vendorErrorPreview(bodyText: string, data: unknown): string {
+  if (data && typeof data === 'object') {
+    const err = data as { error?: { message?: string } }
+    if (err.error?.message) return redactSecrets(err.error.message).slice(0, 400)
+  }
+  return redactSecrets(bodyText).slice(0, 400)
 }
 
 function extractTextFromResponse(data: unknown): string {
@@ -294,84 +310,130 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function callKieVision(messages: unknown[], apiKey: string): Promise<string> {
-  const res = await fetch(`${KIE_API_BASE}${ANALYZE_ENDPOINT}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      messages,
-      stream: false,
-      temperature: ANALYZE_TEMPERATURE,
-    }),
-  })
-
-  const bodyText = await res.text()
+async function callGoogleGeminiVision(
+  imageBase64: string,
+  apiKey: string,
+  extraUserText?: string,
+): Promise<string> {
+  const model = resolveAnalysisGeminiModel()
+  const started = Date.now()
+  const url = `${GOOGLE_GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`
+  let httpStatus = 0
+  let bodyText = ''
   let data: unknown
+
+  const contents: Array<Record<string, unknown>> = [
+    {
+      role: 'user',
+      parts: [
+        { text: COMBINED_ANALYZE_PROMPT },
+        {
+          inlineData: {
+            mimeType: getMime(imageBase64),
+            data: toRawBase64(imageBase64),
+          },
+        },
+      ],
+    },
+  ]
+  if (extraUserText) {
+    contents.push({ role: 'user', parts: [{ text: extraUserText }] })
+  }
+
   try {
-    data = JSON.parse(bodyText)
-  } catch {
-    throw new Error(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${bodyText}`)
-  }
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: MATCH_SYSTEM }] },
+        contents,
+        generationConfig: {
+          temperature: ANALYZE_TEMPERATURE,
+          responseMimeType: 'application/json',
+        },
+      }),
+    })
 
-  if (!res.ok) {
-    const err = data as { error?: { message?: string }; msg?: string }
-    throw new Error(`kie.ai ${ANALYZE_MODEL} ${res.status} — ${err.error?.message ?? err.msg ?? bodyText}`)
-  }
+    httpStatus = res.status
+    bodyText = await res.text()
+    try {
+      data = JSON.parse(bodyText)
+    } catch {
+      data = undefined
+    }
 
-  const parsed = data as { code?: number; msg?: string }
-  if (typeof parsed.code === 'number' && parsed.code !== 200) {
-    throw new Error(`kie.ai ${ANALYZE_MODEL} — ${parsed.msg ?? 'erreur'}`)
-  }
+    if (!res.ok) {
+      const err = data as { error?: { message?: string; status?: string } } | undefined
+      throw new Error(
+        `google_gemini ${model} ${res.status}${err?.error?.status ? ` ${err.error.status}` : ''} — ${vendorErrorPreview(bodyText, data)}`,
+      )
+    }
 
-  const raw = extractTextFromResponse(data)
-  if (!raw) {
-    console.error('[analyze] empty model text, response preview:', bodyText.slice(0, 800))
-    throw new Error('Réponse vide du modèle')
+    const raw = extractTextFromResponse(data)
+    if (!raw) {
+      console.error('[analyze] empty model text, response preview:', redactSecrets(bodyText).slice(0, 800))
+      throw new Error('Réponse vide du modèle')
+    }
+
+    console.log('[analyze]', {
+      analysis_provider: ANALYSIS_PROVIDER,
+      analysis_model: model,
+      analysis_duration_ms: Date.now() - started,
+      analysis_success: true,
+    })
+    return raw
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[analyze]', {
+      analysis_provider: ANALYSIS_PROVIDER,
+      analysis_model: model,
+      analysis_duration_ms: Date.now() - started,
+      analysis_success: false,
+      analysis_provider_error: {
+        http_status: httpStatus || undefined,
+        error_type: (data as { error?: { status?: string } } | undefined)?.error?.status
+          ?? (err instanceof Error ? err.name : 'Error'),
+        vendor_message: redactSecrets(message).slice(0, 400),
+      },
+    })
+    throw err instanceof Error ? err : new Error(message)
   }
-  return raw
 }
 
-async function callKieVisionWithRetry(messages: unknown[], apiKey: string): Promise<string> {
+async function callGeminiVisionWithRetry(imageBase64: string, apiKey: string): Promise<string> {
   let lastErr: Error | undefined
-  for (let attempt = 1; attempt <= ANALYZE_KIE_MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= ANALYZE_MAX_ATTEMPTS; attempt++) {
     try {
-      return await callKieVision(messages, apiKey)
+      return await callGoogleGeminiVision(imageBase64, apiKey)
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err))
-      if (!isTransientKieError(lastErr.message) || attempt === ANALYZE_KIE_MAX_ATTEMPTS) {
+      if (!isTransientKieError(lastErr.message) || attempt === ANALYZE_MAX_ATTEMPTS) {
         throw lastErr
       }
-      console.warn('[analyze] transient KIE error, retry', attempt, lastErr.message.slice(0, 200))
-      await delay(ANALYZE_KIE_RETRY_DELAY_MS * attempt)
+      console.warn('[analyze] transient Gemini error, retry', attempt, lastErr.message.slice(0, 200))
+      await delay(ANALYZE_RETRY_DELAY_MS * attempt)
     }
   }
   throw lastErr ?? new Error('Analyse interrompue')
 }
 
 async function callWithOptionalRetry(
-  messages: unknown[],
+  imageBase64: string,
   apiKey: string,
 ): Promise<Record<string, unknown>> {
   try {
-    const raw = await callKieVisionWithRetry(messages, apiKey)
+    const raw = await callGeminiVisionWithRetry(imageBase64, apiKey)
     return extractJsonObject(raw)
   } catch (firstErr) {
     const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr)
     if (isTransientKieError(firstMessage)) {
       throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
     }
-    const retryMessages = [
-      ...messages,
-      {
-        role: 'user',
-        content: 'Ta réponse précédente était invalide. Renvoie UNIQUEMENT l\'objet JSON demandé, sans markdown ni texte autour.',
-      },
-    ]
     try {
-      const raw = await callKieVision(retryMessages, apiKey)
+      const raw = await callGoogleGeminiVision(imageBase64, apiKey, ANALYZE_JSON_RETRY_TEXT)
       return extractJsonObject(raw)
     } catch {
       throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
@@ -390,20 +452,6 @@ type AnalysisJobRow = {
   analysis_id: string | null
   created_at: string
   updated_at: string
-}
-
-function buildAnalysisMessages(imageBase64: string): unknown[] {
-  const imageUrl = toDataUrl(imageBase64)
-  return [
-    { role: 'system', content: MATCH_SYSTEM },
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: COMBINED_ANALYZE_PROMPT },
-        { type: 'image_url', image_url: { url: imageUrl } },
-      ],
-    },
-  ]
 }
 
 async function reloadAnalysisJob(
@@ -527,7 +575,7 @@ async function runAnalysisJob(jobId: string, apiKey: string): Promise<void> {
 
   const startMs = Date.now()
   try {
-    const parsed = await callWithOptionalRetry(buildAnalysisMessages(job.image_base64), apiKey)
+    const parsed = await callWithOptionalRetry(job.image_base64, apiKey)
     console.log('[analyze] job timing ms:', Date.now() - startMs, 'jobId:', jobId)
     console.log('[analyze] candidates:', JSON.stringify(parsed).slice(0, 800))
 
@@ -776,8 +824,8 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const kieKey = Deno.env.get('KIE_API_KEY')
-    if (!kieKey) throw new Error('KIE_API_KEY non configurée dans les secrets Supabase')
+    const geminiKey = Deno.env.get('GEMINI_API_KEY')
+    if (!geminiKey) throw new Error('GEMINI_API_KEY non configurée dans les secrets Supabase')
 
     const body = await req.json() as {
       pollJobId?: string
@@ -787,12 +835,12 @@ Deno.serve(async (req: Request) => {
     }
 
     if (typeof body.pollJobId === 'string' && body.pollJobId.trim()) {
-      return await handlePollJob(body.pollJobId.trim(), kieKey)
+      return await handlePollJob(body.pollJobId.trim(), geminiKey)
     }
 
     if (!body.imageBase64) throw new Error('imageBase64 requis')
 
-    return await handleStartAnalysis(body.imageBase64, body.sessionId, body.userId, kieKey)
+    return await handleStartAnalysis(body.imageBase64, body.sessionId, body.userId, geminiKey)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erreur interne'
     console.error('[analyze] final error:', message)

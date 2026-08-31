@@ -107,6 +107,13 @@ export function isTransientKieError(message: string): boolean {
 export function formatAnalyzeError(message: string, code?: string): string {
   const lower = message.toLowerCase()
 
+  if (
+    lower.includes('google_gemini') &&
+    (lower.includes('401') || lower.includes('403') || lower.includes('api key') || lower.includes('api_key'))
+  ) {
+    return 'Clé API Gemini invalide. Vérifie GEMINI_API_KEY.'
+  }
+
   if (code === 'KIE_VENDOR_INSUFFICIENT') {
     return 'Le service d\'analyse IA est temporairement indisponible. Réessaie un peu plus tard.'
   }

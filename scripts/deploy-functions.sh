@@ -1,7 +1,9 @@
 #!/bin/bash
 # Déploie les Edge Functions sur Supabase
 # Prérequis : npx supabase login
-# Secrets requis : KIE_API_KEY (Supabase Dashboard → Edge Functions → Secrets)
+# Secrets requis :
+#   GEMINI_API_KEY (analyse faciale — Edge Function analyze)
+#   KIE_API_KEY (génération Nano Banana — Edge Function generate)
 set -e
 cd "$(dirname "$0")/.."
 PROJECT_REF=glgizfydsqsomrixgdyx
