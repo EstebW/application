@@ -49,6 +49,20 @@ async function fetchWikiThumb(lang: 'fr' | 'en', title: string): Promise<string 
   return resolveWikiPortraitUrl(data)
 }
 
+/** Hôtes autorisés pour convertir un portrait en data URL — évite un proxy ouvert. */
+export function isAllowedCelebrityImageUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'https:') return false
+    const host = url.hostname.toLowerCase()
+    return host === 'upload.wikimedia.org'
+      || host.endsWith('.wikipedia.org')
+      || host.endsWith('.wikimedia.org')
+  } catch {
+    return false
+  }
+}
+
 /** Portrait Wikipedia FR puis EN — utilisable côté serveur ou client (via /api). */
 export async function fetchCelebrityWikiImageUrl(name: string): Promise<string | null> {
   const trimmed = name.trim()
@@ -101,6 +115,58 @@ export async function resolveCelebrityImageDataUrl(name: string): Promise<string
     return dataUrl
   } catch {
     dataUrlCache.set(key, null)
+    return null
+  }
+}
+
+/** Convertit un portrait déjà choisi (recherche de star) en data URL. */
+export async function resolveCelebrityImageDataUrlFromUrl(imageUrl: string): Promise<string | null> {
+  if (!isAllowedCelebrityImageUrl(imageUrl)) return null
+  if (dataUrlCache.has(imageUrl)) return dataUrlCache.get(imageUrl) ?? null
+
+  try {
+    const res = await fetch(`/api/celebrity-image?url=${encodeURIComponent(imageUrl)}&format=dataurl`)
+    if (!res.ok) {
+      dataUrlCache.set(imageUrl, null)
+      return null
+    }
+    const data = (await res.json()) as { dataUrl?: string | null }
+    const dataUrl = data.dataUrl ?? null
+    dataUrlCache.set(imageUrl, dataUrl)
+    return dataUrl
+  } catch {
+    dataUrlCache.set(imageUrl, null)
+    return null
+  }
+}
+
+export interface OptimizedCelebrityPortrait {
+  dataUrl: string
+  /** `ai` si un modèle a comparé les candidates, `heuristic` sinon. */
+  pickedBy: 'ai' | 'heuristic' | 'none'
+}
+
+/**
+ * Cherche la meilleure photo de référence disponible pour une star
+ * (frontale, visage dégagé) au lieu de la vignette d'article Wikipedia.
+ */
+export async function resolveOptimizedCelebrityPortrait(
+  name: string,
+  fallbackImageUrl?: string,
+): Promise<OptimizedCelebrityPortrait | null> {
+  const params = new URLSearchParams({ name: name.trim() })
+  if (fallbackImageUrl) params.set('fallback', fallbackImageUrl)
+
+  try {
+    const res = await fetch(`/api/celebrity-portrait?${params.toString()}`)
+    if (!res.ok) return null
+    const data = (await res.json()) as { dataUrl?: string | null; pickedBy?: string }
+    if (!data.dataUrl) return null
+    return {
+      dataUrl: data.dataUrl,
+      pickedBy: data.pickedBy === 'ai' ? 'ai' : data.pickedBy === 'heuristic' ? 'heuristic' : 'none',
+    }
+  } catch {
     return null
   }
 }

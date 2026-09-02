@@ -8,11 +8,15 @@ import { fileURLToPath } from 'node:url'
 import { COMBINED_ANALYZE_PROMPT, MATCH_SYSTEM } from '../lib/kie-analyze.ts'
 import {
   ANALYSIS_PROVIDER,
+  DEFAULT_ANALYSIS_GEMINI_FALLBACK_MODEL,
   DEFAULT_ANALYSIS_GEMINI_MODEL,
   buildGoogleGeminiAnalyzeBody,
   googleGeminiAnalyzeUrl,
   resolveAnalysisGeminiModel,
+  resolveAnalysisGeminiModels,
+  shouldFallbackGeminiModel,
 } from '../lib/google-gemini-analyze.ts'
+import { isRetryableAnalysisPollError, isTransientKieError } from '../lib/kie-errors.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -77,5 +81,27 @@ describe('transport Gemini Google (analyse)', () => {
     const inline = contents[0].parts[1].inlineData as { mimeType: string; data: string }
     assert.equal(inline.mimeType, 'image/jpeg')
     assert.equal(inline.data, 'abc123')
+  })
+
+  it('enchaîne gemini-3.7-flash puis gemini-3.6-flash si surcharge', () => {
+    assert.equal(DEFAULT_ANALYSIS_GEMINI_FALLBACK_MODEL, 'gemini-3.6-flash')
+    assert.deepEqual(resolveAnalysisGeminiModels({}), [
+      'gemini-3.7-flash',
+      'gemini-3.6-flash',
+    ])
+    assert.deepEqual(
+      resolveAnalysisGeminiModels({ ANALYSIS_GEMINI_FALLBACK_MODEL: 'gemini-3.7-flash' }),
+      ['gemini-3.7-flash'],
+    )
+  })
+
+  it('détecte une 503 high demand Gemini comme transitoire + fallback modèle', () => {
+    const msg = 'google_gemini gemini-3.7-flash 503 UNAVAILABLE — This model is currently experiencing high demand. Please retry.'
+    assert.equal(shouldFallbackGeminiModel(msg), true)
+    assert.equal(isTransientKieError(msg), true)
+    assert.equal(isRetryableAnalysisPollError(500, msg), true)
+    assert.equal(isRetryableAnalysisPollError(500, 'Les serveurs d\'analyse sont surchargés. Réessaie dans quelques secondes.'), true)
+    assert.equal(isRetryableAnalysisPollError(400, msg), false)
+    assert.equal(isRetryableAnalysisPollError(500, 'Aucun visage clairement visible'), false)
   })
 })

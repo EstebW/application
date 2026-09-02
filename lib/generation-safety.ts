@@ -12,6 +12,7 @@ export const GOOGLE_SAFETY_MARKERS = [
   'blocked by google',
   'generative ai prohibited use policy',
   'safety filter',
+  'unable to show the generated image',
 ] as const
 
 export function hasGoogleSafetyMarker(lower: string): boolean {

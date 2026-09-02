@@ -32,6 +32,7 @@ export function formatKieError(message: string, code?: string): string {
   if (
     lower.includes('prohibited use policy') ||
     lower.includes('violated google') ||
+    lower.includes('unable to show the generated image') ||
     (lower.includes('filtered out') && lower.includes('google'))
   ) {
     return 'Cette génération n\'a pas pu être réalisée automatiquement. Essaie une autre photo ou une autre mise en scène.'
@@ -99,8 +100,18 @@ export function isTransientKieError(message: string): boolean {
     /\b502\b/.test(lower) ||
     /\b503\b/.test(lower) ||
     lower.includes('temporarily unavailable') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('resource_exhausted') ||
     lower.includes('overloaded')
   )
+}
+
+/** HTTP poll analyse : 502/503/504, ou 500/429 avec surcharge Gemini. */
+export function isRetryableAnalysisPollError(status: number, message: string): boolean {
+  if (status === 502 || status === 503 || status === 504) return true
+  if (status !== 500 && status !== 429) return false
+  return isTransientKieError(message) || /surcharg/i.test(message)
 }
 
 /** Messages utilisateur pour l'analyse faciale (pas la génération photo). */

@@ -7,6 +7,7 @@ import { extractTextFromVisionResponse } from './kie-vision-response.ts'
 
 export const ANALYSIS_PROVIDER = 'google_direct'
 export const DEFAULT_ANALYSIS_GEMINI_MODEL = 'gemini-3.7-flash'
+export const DEFAULT_ANALYSIS_GEMINI_FALLBACK_MODEL = 'gemini-3.6-flash'
 export const GOOGLE_GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
 export function resolveAnalysisGeminiModel(
@@ -14,6 +15,29 @@ export function resolveAnalysisGeminiModel(
 ): string {
   const raw = env.ANALYSIS_GEMINI_MODEL?.trim()
   return raw || DEFAULT_ANALYSIS_GEMINI_MODEL
+}
+
+export function resolveAnalysisGeminiModels(
+  env: Record<string, string | undefined> = typeof process !== 'undefined' ? process.env : {},
+): string[] {
+  const primary = resolveAnalysisGeminiModel(env)
+  const fallback = env.ANALYSIS_GEMINI_FALLBACK_MODEL?.trim() || DEFAULT_ANALYSIS_GEMINI_FALLBACK_MODEL
+  const models = [primary]
+  if (fallback && fallback !== primary) models.push(fallback)
+  return models
+}
+
+export function shouldFallbackGeminiModel(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('not found') ||
+    lower.includes('resource_exhausted') ||
+    /\b404\b/.test(lower) ||
+    /\b429\b/.test(lower) ||
+    /\b503\b/.test(lower)
+  )
 }
 
 export function toRawBase64(base64: string) {

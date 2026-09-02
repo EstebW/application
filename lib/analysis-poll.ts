@@ -1,6 +1,6 @@
 import { callFunction, FunctionCallError } from './functions'
 import type { CelebrityResult } from './types'
-import { formatAnalyzeError } from './kie-errors'
+import { formatAnalyzeError, isRetryableAnalysisPollError } from './kie-errors'
 
 export const ANALYSIS_POLL_INTERVAL_MS = 2_500
 export const ANALYSIS_POLL_TIMEOUT_MS = 300_000
@@ -27,8 +27,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function isPollTransportError(err: unknown): boolean {
-  return err instanceof FunctionCallError && (err.status === 502 || err.status === 503 || err.status === 504)
+function isRetryablePollTransport(err: unknown): boolean {
+  return err instanceof FunctionCallError && isRetryableAnalysisPollError(err.status, err.message)
 }
 
 /** Lance l'analyse puis interroge le backend jusqu'au résultat ou timeout. */
@@ -60,12 +60,16 @@ export async function runAnalysisWithPolling(
     try {
       const poll = await callFunction<AnalysisPollResponse>('analyze', { pollJobId })
       if (poll.status === 'pending') continue
-      if (poll.error) throw new Error(formatAnalyzeError(poll.error))
+      if (poll.status === 'failed' || poll.error) {
+        const message = poll.error ?? 'Analyse échouée'
+        if (isRetryableAnalysisPollError(500, message)) continue
+        throw new Error(formatAnalyzeError(message))
+      }
       if (poll.name && typeof poll.score === 'number') {
         return poll as CelebrityResult & { analysisId?: string }
       }
     } catch (err) {
-      if (isPollTransportError(err)) continue
+      if (isRetryablePollTransport(err)) continue
       if (err instanceof FunctionCallError) {
         throw new Error(formatAnalyzeError(err.message, err.code))
       }

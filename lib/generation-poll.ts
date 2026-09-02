@@ -53,9 +53,11 @@ export async function runGenerationWithPolling(
   const intervalMs = start.pollIntervalMs ?? GENERATION_POLL_INTERVAL_MS
   const timeoutMs = start.pollTimeoutMs ?? GENERATION_POLL_TIMEOUT_MS
   const deadline = Date.now() + timeoutMs
+  let firstPoll = true
 
   while (Date.now() < deadline) {
-    await sleep(intervalMs)
+    if (!firstPoll) await sleep(intervalMs)
+    firstPoll = false
 
     try {
       const poll = await callFunction<GenerationPollResponse>('generate', { pollJobId })

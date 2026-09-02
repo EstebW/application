@@ -1684,6 +1684,38 @@ async function resolveCelebrityReferenceForKie(
   }
 }
 
+/** Upload utilisateur + référence star en parallèle — n’influence ni le prompt ni la résolution. */
+async function prepareKieImageInputs(
+  imageBase64: string,
+  celebrityName: string,
+  celebrityImageBase64: string | undefined,
+  apiKey: string,
+): Promise<{
+  imageUrls: string[]
+  hasReference: boolean
+  celebrityRefSource: 'upload' | 'wikipedia' | 'none'
+  tempPaths: string[]
+}> {
+  const userTemp: string[] = []
+  const celebTemp: string[] = []
+  const [imageUrl, celebrityRef] = await Promise.all([
+    resolveReferenceImageUrl(imageBase64, apiKey, userTemp),
+    resolveCelebrityReferenceForKie(celebrityName, celebrityImageBase64, apiKey, celebTemp),
+  ])
+  const imageUrls = [imageUrl]
+  if (celebrityRef.imageUrl) imageUrls.push(celebrityRef.imageUrl)
+  return {
+    imageUrls,
+    hasReference: celebrityRef.hasReference,
+    celebrityRefSource: celebrityImageBase64
+      ? 'upload'
+      : celebrityRef.hasReference
+        ? 'wikipedia'
+        : 'none',
+    tempPaths: [...userTemp, ...celebTemp],
+  }
+}
+
 function resolvePhotoEditModel(): 'nano-banana-2' | 'google/nano-banana-edit' {
   const raw = (Deno.env.get('PHOTO_EDIT_KIE_MODEL') ?? 'nano-banana-2').trim()
   return raw === 'google/nano-banana-edit' ? 'google/nano-banana-edit' : 'nano-banana-2'
@@ -1720,6 +1752,7 @@ const GOOGLE_SAFETY_MARKERS = [
   'blocked by google',
   'generative ai prohibited use policy',
   'safety filter',
+  'unable to show the generated image',
 ] as const
 
 function hasGoogleSafetyMarker(lower: string): boolean {
@@ -1937,21 +1970,40 @@ async function fetchKieTaskOnce(taskId: string, apiKey: string): Promise<KieTask
     msg?: string
     data?: { state: string; resultJson?: string; failMsg?: string }
   }
+  const record = json.data
+  const combinedFail = [record?.failMsg, json.msg].filter(Boolean).join(' — ')
+
+  // KIE renvoie souvent code 400 + le texte Google policy au lieu de state=fail.
+  // Il ne faut PAS throw : ça court-circuite le retry safety.
   if (json.code !== 200) {
+    const failMsg = combinedFail || `kie.ai poll code ${json.code}`
+    if (isGoogleSafetyBlockedMessage(failMsg) || json.code === 400) {
+      return { state: 'fail', failMsg }
+    }
     throw new Error(`kie.ai poll: ${json.msg ?? 'erreur'} (code ${json.code})`)
   }
-  const record = json.data
+
   if (!record || record.state === 'waiting' || record.state === 'processing' || record.state === 'pending') {
     return { state: 'pending' }
   }
   if (record.state === 'success') {
-    const parsed = JSON.parse(record.resultJson ?? '{}') as { resultUrls?: string[] }
+    let parsed: { resultUrls?: string[]; error?: string; msg?: string } = {}
+    try {
+      parsed = JSON.parse(record.resultJson ?? '{}') as { resultUrls?: string[]; error?: string; msg?: string }
+    } catch {
+      parsed = {}
+    }
     const url = parsed.resultUrls?.[0]
-    if (!url) throw new Error('Nano Banana 2: pas d\'URL dans le résultat')
+    if (!url) {
+      return {
+        state: 'fail',
+        failMsg: combinedFail || parsed.error || parsed.msg || 'No images found in AI response',
+      }
+    }
     return { state: 'success', resultUrl: url }
   }
   if (record.state === 'fail') {
-    return { state: 'fail', failMsg: record.failMsg ?? 'inconnu' }
+    return { state: 'fail', failMsg: combinedFail || 'inconnu' }
   }
   return { state: 'pending' }
 }
@@ -2202,7 +2254,16 @@ async function handlePollJob(
     )
   }
 
-  const snapshot = await fetchKieTaskOnce(job.kie_task_id, kieKey)
+  let snapshot: KieTaskSnapshot
+  try {
+    snapshot = await fetchKieTaskOnce(job.kie_task_id, kieKey)
+  } catch (err) {
+    const failMsg = getErrorMessage(err)
+    if (isGoogleSafetyBlockedMessage(failMsg)) {
+      return await handleSafetyBlockedFailure(job, failMsg, db, kieKey)
+    }
+    throw err
+  }
   if (snapshot.state === 'pending') {
     return new Response(
       JSON.stringify({ status: 'pending', pollJobId: job.id }),
@@ -2212,7 +2273,8 @@ async function handlePollJob(
 
   if (snapshot.state === 'fail') {
     const failMsg = snapshot.failMsg ?? 'inconnu'
-    if (isGoogleSafetyBlockedMessage(failMsg)) {
+    const emptyFilteredImage = /no images found in ai response/i.test(failMsg)
+    if (isGoogleSafetyBlockedMessage(failMsg) || emptyFilteredImage) {
       return await handleSafetyBlockedFailure(job, failMsg, db, kieKey)
     }
 
@@ -2455,122 +2517,129 @@ Deno.serve(async (req: Request) => {
     }
 
     // full_generation : lookup complet (Wikidata). photo_edit selfie : cache DB uniquement.
+    // Uploads KIE en parallèle de la taille + composition : le job Nano Banana part plus tôt,
+    // sans changer le prompt ni la résolution.
     const startMs = Date.now()
-    if (userHeightCm) {
-      const tHeight = Date.now()
-      const starfusionCelebrityId = celebrityIdFromName(celebrityName)
-      const heightLookupName = celebrityName
-      const celebrityHeight = creationMode === 'photo_edit'
-        ? await resolveCelebrityHeightCacheOnly(db, heightLookupName)
-        : await resolveCelebrityHeight(db, heightLookupName)
-      generationContext.celebrityHeightCm = celebrityHeight.heightCm
-      generationContext.celebrityHeightConfidence = celebrityHeight.confidence
-      const targetRatio = computeTargetApparentHeightRatio(userHeightCm, celebrityHeight.heightCm)
-      if (targetRatio != null) generationContext.celebrityTargetApparentHeightRatio = targetRatio
-      logGenerateTiming('height_lookup', tHeight, {
-        creationMode,
-        cacheOnly: creationMode === 'photo_edit',
-        celebrityHeightCm: celebrityHeight.heightCm,
-      })
-      logHeightEvent('constraint_applied', {
-        celebrityId: celebrityHeight.celebrityId || starfusionCelebrityId,
-        lookupName: heightLookupName,
-        typedName: celebrityName,
-        creationMode,
-        userHeightCm,
-        celebrityHeightCm: celebrityHeight.heightCm,
-        celebrityHeightConfidence: celebrityHeight.confidence,
-        targetApparentHeightRatio: generationContext.celebrityTargetApparentHeightRatio ?? null,
-        sourceUrl: celebrityHeight.sourceUrl,
-      })
-    }
-
-    if (creationMode === 'photo_edit') {
-      const tComposition = Date.now()
-      const composition = await analyzePhotoEditComposition(imageBase64, generationContext, kieKey)
-      logGenerateTiming('composition_analysis', tComposition, {
-        suitable: composition.suitable,
-      })
-      if (!composition.suitable) {
-        return new Response(
-          JSON.stringify({
-            error: 'Cette photo ne permet pas d\'ajouter la star de façon crédible. Essaie une autre photo avec plus d\'espace libre à côté de toi.',
-            code: 'SOURCE_PHOTO_UNSUITABLE',
-          }),
-          { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } },
-        )
-      }
-      generationContext.celebrityPlacementInstruction = composition.celebrityPlacementInstruction
-      if (composition.targetApparentHeightRatio != null) {
-        generationContext.celebrityTargetApparentHeightRatio = composition.targetApparentHeightRatio
-      }
-    }
-
-    const sceneSummary = buildSceneSummary(generationContext)
-
+    const tempPaths: string[] = []
+    let uploadsP: ReturnType<typeof prepareKieImageInputs> | undefined
     let creditsBalance: number | undefined = billingSession?.credits_balance ?? undefined
     let creditReserved = false
-
-    if (!unlimitedAccess) {
-      const { data: consumeRaw, error: consumeErr } = await db.rpc('consume_generation_credit', {
-        p_session_id: billingSessionId,
-        p_amount: GENERATION_CREDIT_COST,
-      })
-      const consume = (consumeRaw ?? null) as { ok?: boolean; new_balance?: number } | null
-      if (consumeErr) {
-        console.error('[generate] consume_generation_credit failed:', consumeErr.message)
-        return new Response(
-          JSON.stringify({
-            error: 'Le débit de crédit est temporairement indisponible. Réessaie dans un instant.',
-            code: 'APP_CREDIT_DEBIT_UNAVAILABLE',
-          }),
-          { status: 503, headers: { ...CORS, 'Content-Type': 'application/json' } }
-        )
-      }
-      if (!consume?.ok) {
-        return new Response(
-          JSON.stringify({
-            error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
-            code: 'APP_CREDITS_INSUFFICIENT',
-          }),
-          { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
-        )
-      }
-      creditsBalance = typeof consume.new_balance === 'number' ? consume.new_balance : undefined
-      creditReserved = true
-    }
-
-    // Mémoriser la taille — best-effort.
-    if (userHeightCm) {
-      try {
-        await db.from('sessions').update({ height_cm: userHeightCm }).eq('id', billingSessionId)
-      } catch (err) {
-        logHeightEvent('user_height_persist_failed', { error: getErrorMessage(err) })
-      }
-    }
-
     let pollJobId: string | undefined
-    const tempPaths: string[] = []
+
     try {
-      const tUpload = Date.now()
-      const imageUrl = await resolveReferenceImageUrl(imageBase64, kieKey, tempPaths)
-      const imageUrls = [imageUrl]
-      const celebrityRef = await resolveCelebrityReferenceForKie(
+      const pendingUploads = prepareKieImageInputs(
+        imageBase64,
         celebrityName,
         celebrityImageBase64,
         kieKey,
-        tempPaths,
-      )
-      if (celebrityRef.imageUrl) {
-        imageUrls.push(celebrityRef.imageUrl)
-      }
-      generationContext.hasCelebrityReferenceImage = celebrityRef.hasReference
-      logGenerateTiming('image_upload', tUpload, {
-        imageCount: imageUrls.length,
-        creationMode,
-        hasCelebrityReferenceImage: celebrityRef.hasReference,
-        celebrityRefSource: celebrityImageBase64 ? 'upload' : celebrityRef.hasReference ? 'wikipedia' : 'none',
+      ).then((prepared) => {
+        tempPaths.push(...prepared.tempPaths)
+        return prepared
       })
+      uploadsP = pendingUploads
+      if (userHeightCm) {
+        const tHeight = Date.now()
+        const starfusionCelebrityId = celebrityIdFromName(celebrityName)
+        const heightLookupName = celebrityName
+        const celebrityHeight = creationMode === 'photo_edit'
+          ? await resolveCelebrityHeightCacheOnly(db, heightLookupName)
+          : await resolveCelebrityHeight(db, heightLookupName)
+        generationContext.celebrityHeightCm = celebrityHeight.heightCm
+        generationContext.celebrityHeightConfidence = celebrityHeight.confidence
+        const targetRatio = computeTargetApparentHeightRatio(userHeightCm, celebrityHeight.heightCm)
+        if (targetRatio != null) generationContext.celebrityTargetApparentHeightRatio = targetRatio
+        logGenerateTiming('height_lookup', tHeight, {
+          creationMode,
+          cacheOnly: creationMode === 'photo_edit',
+          celebrityHeightCm: celebrityHeight.heightCm,
+        })
+        logHeightEvent('constraint_applied', {
+          celebrityId: celebrityHeight.celebrityId || starfusionCelebrityId,
+          lookupName: heightLookupName,
+          typedName: celebrityName,
+          creationMode,
+          userHeightCm,
+          celebrityHeightCm: celebrityHeight.heightCm,
+          celebrityHeightConfidence: celebrityHeight.confidence,
+          targetApparentHeightRatio: generationContext.celebrityTargetApparentHeightRatio ?? null,
+          sourceUrl: celebrityHeight.sourceUrl,
+        })
+      }
+
+      const tPrep = Date.now()
+      const compositionP = creationMode === 'photo_edit'
+        ? analyzePhotoEditComposition(imageBase64, generationContext, kieKey)
+        : Promise.resolve(null)
+
+      const [prepared, composition] = await Promise.all([pendingUploads, compositionP])
+      logGenerateTiming('prep_parallel', tPrep, {
+        creationMode,
+        imageCount: prepared.imageUrls.length,
+        hasCelebrityReferenceImage: prepared.hasReference,
+        celebrityRefSource: prepared.celebrityRefSource,
+        compositionSuitable: composition?.suitable ?? null,
+      })
+
+      if (composition) {
+        logGenerateTiming('composition_analysis', tPrep, {
+          suitable: composition.suitable,
+        })
+        if (!composition.suitable) {
+          return new Response(
+            JSON.stringify({
+              error: 'Cette photo ne permet pas d\'ajouter la star de façon crédible. Essaie une autre photo avec plus d\'espace libre à côté de toi.',
+              code: 'SOURCE_PHOTO_UNSUITABLE',
+            }),
+            { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } },
+          )
+        }
+        generationContext.celebrityPlacementInstruction = composition.celebrityPlacementInstruction
+        if (composition.targetApparentHeightRatio != null) {
+          generationContext.celebrityTargetApparentHeightRatio = composition.targetApparentHeightRatio
+        }
+      }
+
+      generationContext.hasCelebrityReferenceImage = prepared.hasReference
+      const imageUrls = prepared.imageUrls
+
+      const sceneSummary = buildSceneSummary(generationContext)
+
+      if (!unlimitedAccess) {
+        const { data: consumeRaw, error: consumeErr } = await db.rpc('consume_generation_credit', {
+          p_session_id: billingSessionId,
+          p_amount: GENERATION_CREDIT_COST,
+        })
+        const consume = (consumeRaw ?? null) as { ok?: boolean; new_balance?: number } | null
+        if (consumeErr) {
+          console.error('[generate] consume_generation_credit failed:', consumeErr.message)
+          return new Response(
+            JSON.stringify({
+              error: 'Le débit de crédit est temporairement indisponible. Réessaie dans un instant.',
+              code: 'APP_CREDIT_DEBIT_UNAVAILABLE',
+            }),
+            { status: 503, headers: { ...CORS, 'Content-Type': 'application/json' } }
+          )
+        }
+        if (!consume?.ok) {
+          return new Response(
+            JSON.stringify({
+              error: 'Crédits insuffisants. Achète un pack pour générer une photo.',
+              code: 'APP_CREDITS_INSUFFICIENT',
+            }),
+            { status: 402, headers: { ...CORS, 'Content-Type': 'application/json' } }
+          )
+        }
+        creditsBalance = typeof consume.new_balance === 'number' ? consume.new_balance : undefined
+        creditReserved = true
+      }
+
+      if (userHeightCm) {
+        try {
+          await db.from('sessions').update({ height_cm: userHeightCm }).eq('id', billingSessionId)
+        } catch (err) {
+          logHeightEvent('user_height_persist_failed', { error: getErrorMessage(err) })
+        }
+      }
 
       const tCreate = Date.now()
       const kieTaskId = await createTask(imageUrls, generationContext, kieKey)
@@ -2613,6 +2682,7 @@ Deno.serve(async (req: Request) => {
       }
       throw genErr
     } finally {
+      if (uploadsP) await uploadsP.catch(() => undefined)
       await removeTempObjects(tempPaths)
     }
 
@@ -2634,6 +2704,12 @@ Deno.serve(async (req: Request) => {
     // solde insuffisant sur LEUR compte. Ne jamais confondre avec les
     // crédits de l'utilisateur (APP_CREDITS_INSUFFICIENT ci-dessus, status 402).
     const lower = message.toLowerCase()
+    if (isGoogleSafetyBlockedMessage(message)) {
+      return new Response(
+        JSON.stringify(GENERATION_SAFETY_BLOCKED_RESPONSE),
+        { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } },
+      )
+    }
     const isKieVendorCreditError =
       lower.includes('kie.ai') && (lower.includes('code 402') || lower.includes('insufficient') || lower.includes('balance'))
 

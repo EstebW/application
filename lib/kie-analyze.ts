@@ -3,7 +3,8 @@ import { isTransientKieError } from './kie-errors.ts'
 import { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result.ts'
 import {
   callGoogleGeminiAnalyze,
-  resolveAnalysisGeminiModel,
+  resolveAnalysisGeminiModels,
+  shouldFallbackGeminiModel,
 } from './google-gemini-analyze.ts'
 
 export { buildCelebrityResultFromAnalysis, extractJsonObject } from './twin-result.ts'
@@ -74,8 +75,8 @@ Règles :
 - si aucun visage : {"error":"visage non détecté"}`
 
 const ANALYZE_TEMPERATURE = 0.2
-const ANALYZE_MAX_ATTEMPTS = 2
-const ANALYZE_RETRY_DELAY_MS = 1_500
+const ANALYZE_MAX_ATTEMPTS = 3
+const ANALYZE_RETRY_DELAY_MS = 2_000
 const ANALYZE_JSON_RETRY_TEXT =
   'Ta réponse précédente était invalide. Renvoie UNIQUEMENT l\'objet JSON demandé, sans markdown ni texte autour.'
 
@@ -88,15 +89,26 @@ async function callGeminiVision(
   apiKey: string,
   extraUserText?: string,
 ): Promise<string> {
-  return await callGoogleGeminiAnalyze({
-    systemInstruction: MATCH_SYSTEM,
-    userText: COMBINED_ANALYZE_PROMPT,
-    imageBase64,
-    extraUserText,
-    apiKey,
-    model: resolveAnalysisGeminiModel(),
-    temperature: ANALYZE_TEMPERATURE,
-  })
+  const models = resolveAnalysisGeminiModels()
+  let lastErr: Error | undefined
+  for (let i = 0; i < models.length; i++) {
+    try {
+      return await callGoogleGeminiAnalyze({
+        systemInstruction: MATCH_SYSTEM,
+        userText: COMBINED_ANALYZE_PROMPT,
+        imageBase64,
+        extraUserText,
+        apiKey,
+        model: models[i],
+        temperature: ANALYZE_TEMPERATURE,
+      })
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err))
+      const canFallback = i < models.length - 1 && shouldFallbackGeminiModel(lastErr.message)
+      if (!canFallback) throw lastErr
+    }
+  }
+  throw lastErr ?? new Error('Analyse interrompue')
 }
 
 async function callGeminiVisionWithRetry(imageBase64: string, apiKey: string): Promise<string> {

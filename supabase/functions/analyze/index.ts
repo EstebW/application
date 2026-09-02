@@ -7,16 +7,18 @@ const CORS = {
 
 const GOOGLE_GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const DEFAULT_ANALYSIS_GEMINI_MODEL = 'gemini-3.7-flash'
+const DEFAULT_ANALYSIS_GEMINI_FALLBACK_MODEL = 'gemini-3.6-flash'
 const ANALYSIS_PROVIDER = 'google_direct'
 const ANALYZE_TEMPERATURE = 0.2
-const ANALYZE_MAX_ATTEMPTS = 2
-const ANALYZE_RETRY_DELAY_MS = 1_500
+const ANALYZE_MAX_ATTEMPTS = 3
+const ANALYZE_RETRY_DELAY_MS = 2_000
 const ANALYZE_JSON_RETRY_TEXT =
   'Ta réponse précédente était invalide. Renvoie UNIQUEMENT l\'objet JSON demandé, sans markdown ni texte autour.'
 const ANALYSIS_POLL_INTERVAL_MS = 2_500
 const ANALYSIS_POLL_TIMEOUT_MS = 300_000
 const ANALYSIS_JOB_RETRY_MS = 90_000
 const ANALYSIS_JOB_ABSOLUTE_MAX_MS = 600_000
+const ANALYSIS_TRANSIENT_COOLDOWN_MS = 8_000
 
 
 // ── Score StarFusion (inline — Deno ne peut pas importer lib/) ──────────────
@@ -197,6 +199,27 @@ function resolveAnalysisGeminiModel(): string {
   return raw || DEFAULT_ANALYSIS_GEMINI_MODEL
 }
 
+function resolveAnalysisGeminiModels(): string[] {
+  const primary = resolveAnalysisGeminiModel()
+  const fallback = Deno.env.get('ANALYSIS_GEMINI_FALLBACK_MODEL')?.trim() || DEFAULT_ANALYSIS_GEMINI_FALLBACK_MODEL
+  const models = [primary]
+  if (fallback && fallback !== primary) models.push(fallback)
+  return models
+}
+
+function shouldFallbackGeminiModel(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('not found') ||
+    lower.includes('resource_exhausted') ||
+    /\b404\b/.test(lower) ||
+    /\b429\b/.test(lower) ||
+    /\b503\b/.test(lower)
+  )
+}
+
 function redactSecrets(text: string): string {
   return text
     .replace(/AIza[0-9A-Za-z_-]{10,}/g, 'REDACTED')
@@ -302,6 +325,9 @@ function isTransientKieError(message: string): boolean {
     /\b502\b/.test(lower) ||
     /\b503\b/.test(lower) ||
     lower.includes('temporarily unavailable') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('resource_exhausted') ||
     lower.includes('overloaded')
   )
 }
@@ -314,8 +340,8 @@ async function callGoogleGeminiVision(
   imageBase64: string,
   apiKey: string,
   extraUserText?: string,
+  model = resolveAnalysisGeminiModel(),
 ): Promise<string> {
-  const model = resolveAnalysisGeminiModel()
   const started = Date.now()
   const url = `${GOOGLE_GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`
   let httpStatus = 0
@@ -403,11 +429,37 @@ async function callGoogleGeminiVision(
   }
 }
 
+async function callGoogleGeminiVisionWithFallback(
+  imageBase64: string,
+  apiKey: string,
+  extraUserText?: string,
+): Promise<string> {
+  const models = resolveAnalysisGeminiModels()
+  let lastErr: Error | undefined
+  for (let i = 0; i < models.length; i++) {
+    try {
+      return await callGoogleGeminiVision(imageBase64, apiKey, extraUserText, models[i])
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err))
+      const canFallback = i < models.length - 1 && shouldFallbackGeminiModel(lastErr.message)
+      if (!canFallback) throw lastErr
+      console.warn(
+        '[analyze] falling back Gemini model',
+        models[i],
+        '->',
+        models[i + 1],
+        lastErr.message.slice(0, 200),
+      )
+    }
+  }
+  throw lastErr ?? new Error('Analyse interrompue')
+}
+
 async function callGeminiVisionWithRetry(imageBase64: string, apiKey: string): Promise<string> {
   let lastErr: Error | undefined
   for (let attempt = 1; attempt <= ANALYZE_MAX_ATTEMPTS; attempt++) {
     try {
-      return await callGoogleGeminiVision(imageBase64, apiKey)
+      return await callGoogleGeminiVisionWithFallback(imageBase64, apiKey)
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err))
       if (!isTransientKieError(lastErr.message) || attempt === ANALYZE_MAX_ATTEMPTS) {
@@ -433,7 +485,7 @@ async function callWithOptionalRetry(
       throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
     }
     try {
-      const raw = await callGoogleGeminiVision(imageBase64, apiKey, ANALYZE_JSON_RETRY_TEXT)
+      const raw = await callGoogleGeminiVisionWithFallback(imageBase64, apiKey, ANALYZE_JSON_RETRY_TEXT)
       return extractJsonObject(raw)
     } catch {
       throw firstErr instanceof Error ? firstErr : new Error(String(firstErr))
@@ -596,6 +648,15 @@ async function runAnalysisJob(jobId: string, apiKey: string): Promise<void> {
     }).eq('id', jobId)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erreur interne'
+    if (isTransientKieError(message)) {
+      console.warn('[analyze] job transient, reset pending:', jobId, message.slice(0, 200))
+      await db.from('analysis_jobs').update({
+        status: 'pending',
+        fail_message: message,
+        updated_at: new Date().toISOString(),
+      }).eq('id', jobId)
+      return
+    }
     console.error('[analyze] job failed:', jobId, message)
     await db.from('analysis_jobs').update({
       status: 'failed',
@@ -627,6 +688,18 @@ async function handlePollJob(
 
   job = await recoverStaleProcessingJob(db, job)
 
+  if (
+    job.status === 'failed'
+    && job.image_base64
+    && isTransientKieError(job.fail_message ?? '')
+  ) {
+    await db.from('analysis_jobs').update({
+      status: 'pending',
+      updated_at: new Date().toISOString(),
+    }).eq('id', job.id)
+    job = { ...job, status: 'pending' }
+  }
+
   if (job.status === 'success' && job.result_json) {
     return new Response(
       JSON.stringify({ status: 'success', ...job.result_json }),
@@ -642,10 +715,19 @@ async function handlePollJob(
   }
 
   if (job.status === 'pending') {
-    try {
-      await runAnalysisJob(pollJobId, apiKey)
-    } catch (err) {
-      console.warn('[analyze] inline poll processing error:', err instanceof Error ? err.message : err)
+    const sinceUpdateMs = Date.now() - new Date(job.updated_at).getTime()
+    const coolingDown = Boolean(
+      job.fail_message
+      && isTransientKieError(job.fail_message)
+      && sinceUpdateMs < ANALYSIS_TRANSIENT_COOLDOWN_MS,
+    )
+
+    if (!coolingDown) {
+      try {
+        await runAnalysisJob(pollJobId, apiKey)
+      } catch (err) {
+        console.warn('[analyze] inline poll processing error:', err instanceof Error ? err.message : err)
+      }
     }
 
     job = await reloadAnalysisJob(db, pollJobId)

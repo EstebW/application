@@ -21,6 +21,15 @@ describe('détection safety Google', () => {
     )
   })
 
+  it('détecte le message KIE 400 Google policy complet', () => {
+    assert.equal(
+      isGoogleSafetyBlockedMessage(
+        'No images found in AI response. Unable to show the generated image. The image was filtered out because it violated Google\'s Generative AI Prohibited Use policy.',
+      ),
+      true,
+    )
+  })
+
   it('ne transforme pas « No images found » seul en safety', () => {
     assert.equal(isGoogleSafetyBlockedMessage('No images found in AI response'), false)
     assert.equal(isGoogleSafetyBlockedMessage('kie.ai poll: timeout'), false)
