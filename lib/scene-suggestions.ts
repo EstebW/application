@@ -10,136 +10,126 @@ interface SceneSuggestions {
   positions: string[]
 }
 
-/** Suggestions originales — drôles, décalées, mémorables (pas de clichés VIP). */
-const DOMAIN_PRESETS: { match: RegExp; suggestions: SceneSuggestions }[] = [
-  {
-    match: /acteur|actrice|cinéma|cinema|film|réalisat/i,
-    suggestions: {
-      locations: [
-        'Toilettes VIP du festival, vous vous lavez les mains en silence gêné',
-        'Siège arrière d\'un Uber noir à 3h, GPS qui recalcule en boucle',
-        'File du McDo drive à Cannes, rouleaux de scénario sur le tableau de bord',
-        'Cabine d\'essayage H&M, rideau mal fermé, mannequin en carton témoin',
-      ],
-      outfits: [
-        'Smoking froissé + chaussettes Mickey qui dépassent',
-        'Peignoir d\'hôtel croisé avec un badge « EXTRA №47 »',
-        'Costumes de super-héros IKEA mal ajustés, masques sur le front',
-        'Tenue de tapis rouge… et crocs roses assortis',
-      ],
-      positions: [
-        'Tu lui tends un autographe… qu\'il doit signer pour toi',
-        'Vous lisez le même script à l\'envers, très concentrés',
-        'Selfie flash parking souterrain, yeux mi-clos de surprise',
-        'Tu lui mimes sa scène culte, il te note sur 10 avec les doigts',
-      ],
-    },
-  },
-  {
-    match: /chanteur|chanteuse|musique|rappeur|rappeuse|artiste/i,
-    suggestions: {
-      locations: [
-        'Cabine karaoke 2€ la chanson, micro collé de trop près',
-        'Rayon instruments d\'un magasin, ukulélé hors de prix à la main',
-        'File d\'attente du merch, tote bag « WORLD TOUR » encore plié',
-        'Toit d\'immeuble à minuit, enceinte Bluetooth qui crache',
-      ],
-      outfits: [
-        'Sweats tour 2014 trop petits, numéros de places collés sur le torse',
-        'Paillettes de scène + jean dad et sandales de randonnée',
-        'Costumes blancs façon boy band, cravates de travers',
-        'Oreilles de chat LED + veste de smoking',
-      ],
-      positions: [
-        'Duo air-guitare ultra sérieux face à un miroir de salle de bain',
-        'Tu tends le micro-brosse à dents, la star chuchote le refrain',
-        'Battle de danse ratée dans un couloir d\'hôtel',
-        'Vous choisirez le pire filtre TikTok ensemble, pouces en l\'air',
-      ],
-    },
-  },
-  {
-    match: /sportif|sport|football|basket|tennis|athlète|athlete/i,
-    suggestions: {
-      locations: [
-        'File des toilettes du stade à la mi-temps, maillots trempés',
-        'Parking du centre d\'entraînement, caddie de courses entre vous',
-        'Distributeur de boissons cassé, pièces coincées, regard caméra',
-        'Banc de touche vide sous la pluie, bâche de secours sur la tête',
-      ],
-      outfits: [
-        'Ton faux maillot floqué « LÉGENDE » à côté du vrai',
-        'Survêtements assortis taille XS et XXL',
-        'Tenue de conf presse + short de foot et chaussettes montantes',
-        'Médailles en chocolat autour du cou, très fières',
-      ],
-      positions: [
-        'Tu rates le high-five trois fois d\'affilée, la star attend',
-        'Pose « célébration iconique » mais tu as mis le mauvais genou',
-        'Comparatif biceps ridicule face à un miroir de vestiaire',
-        'Tu tiens le trophée en plastique, la star applaudit poliment',
-      ],
-    },
-  },
-  {
-    match: /mannequin|mode|top model|fashion/i,
-    suggestions: {
-      locations: [
-        'Cabine d\'essayage Zara, pile de vêtements plus haute que vous',
-        'Escalator du centre commercial, pose éditoriale bloquée au milieu',
-        'File du Starbucks en trench XXL sur un pyjama à motifs',
-        'Parking souterrain, flash brutal façon paparazzi discount',
-      ],
-      outfits: [
-        'Look couture parfait… baskets de gym sales',
-        'Le même manteau porté à l\'envers « volontairement »',
-        'Accessoires de luxe + sac plastique du supermarché',
-        'Lunettes XXL, un verre manquant, attitude fashion week',
-      ],
-      positions: [
-        'Walk fashion ultra lent… vers les toilettes du mall',
-        'Critique d\'une vitrine comme au front row, smoothie à la main',
-        'Vous êtes coincés dans la même écharpe XXL',
-        'Pose « deadpan magazine » pendant qu\'un enfant vous photographie',
-      ],
-    },
-  },
+export const SCENE_SUGGESTION_COUNT = 4
+
+/**
+ * Lieux du quotidien, drôles mais simples — 2 personnes, un décor lisible,
+ * un accessoire max. Évite feu, foule, miroir, micro devant le visage,
+ * costumes et texte minuscule : Nano Banana reste fidèle plus facilement.
+ */
+export const SIMPLE_FUNNY_LOCATIONS = [
+  'Laverie automatique, panier à linge entre vous deux',
+  'Rayon canapés IKEA, vous testez le modèle trop sérieusement',
+  'File du McDo, sacs kraft à la main',
+  'Caisse automatique du supermarché, un article refuse de passer',
+  'Arrêt de bus vide, abri en plastique, lumière du jour',
+  'Cuisine, pain grillé trop cuit, assiettes empilées',
+  'Escalator de centre commercial, sacs de courses',
+  'Salle d\'attente chez le médecin, magazines sur les genoux',
+  'Parking de supermarché, caddie à côté de vous',
+  'Cuisine de bureau, micro-ondes ouvert, barquette à la main',
+  'Boulangerie, sacs de pain chaud',
+  'Banc de parc, sac de courses au sol',
+  'Rayon céréales du supermarché, vous hésitez trop longtemps',
+  'Hall d\'immeuble, vous attendez l\'ascenseur',
+  'Terrasse de café, deux tasses, lumière du jour',
+  'Magasin de meubles, étagère à monter, notice à l\'envers',
+  'Station-service, deux cafés machine, voiture en fond',
+  'Comptoir du pressing, ticket à la main',
+  'Jardinerie, un petit pot de basilic trop cher',
+  'Métro, vous tenez la même barre',
+  'Magasin de chaussures, boîtes ouvertes autour de vous',
+  'Fast-food intérieur, barquettes et serviettes',
+  'File de la Poste, ticket à la main',
+  'Aire d\'autoroute, table en plastique, sandwich triangle',
+  'Superette, porte du frigo ouverte',
+  'Laverie de quartier, linge plié sur la table',
+  'Rayon produits ménagers, vous comparez deux flacons identiques',
+  'Salle de pause, distributeur de snacks coincé',
 ]
 
-const DEFAULT_SUGGESTIONS: SceneSuggestions = {
-  locations: [
-    'Victoire d\'escape room, chronomètre à 00:01, accessoire absurde brandi',
-    'Cuisine ouverte, gâteau raté en feu (discret), extincteur prêt',
-    'Rayon IKEA canapés, vous testez le « Lithem » avec trop de sérieux',
-    'Laverie automatique 23h, panier à linge entre vous deux',
-  ],
-  // Tenues civiles / adaptées au quotidien — pas de costard VIP par défaut
-  outfits: [
-    'Jean + sneakers + sweat / veste légère, looks de sortie entre potes',
-    'Tenues casual décontractées (t-shirt, jean, baskets) adaptées au lieu',
-    'Looks premium froissés genre « on a dormi dans l\'avion » — toujours civils',
-    'Matching pajamas soyeux + lunettes de soleil indoor',
-  ],
-  positions: [
-    'Serment secret hors-cadre, petit doigt croisé, regard caméra grave',
-    'Tu expliques un plan de génie avec les mains, la star doute fort',
-    'Photo souvenir comme en colonie de vacances, pouces forcés',
-    'Vous cachez un gâteau surprise derrière le dos… qui fuit',
-  ],
-}
+/** Tenues civiles toujours mixables avec n'importe quel lieu du pool. */
+export const SIMPLE_FUNNY_OUTFITS = [
+  'Jean, t-shirt et sneakers, looks de tous les jours',
+  'Sweat et baskets, tenues de dimanche',
+  'Veste légère, jean et tennis',
+  'Looks un peu froissés, comme après une journée dehors',
+  'T-shirt, jean et baskets adaptés au lieu',
+  'Jean, sneakers et sweat, looks de sortie entre potes',
+]
 
-export function getSceneSuggestions(celebrityDomain: string): SceneSuggestions {
-  const preset = DOMAIN_PRESETS.find((p) => p.match.test(celebrityDomain))
-  return preset?.suggestions ?? DEFAULT_SUGGESTIONS
-}
+export const SIMPLE_FUNNY_POSITIONS = [
+  'Debout côte à côte, regard caméra un peu trop sérieux',
+  'Assis l\'un à côté de l\'autre, un peu trop droits',
+  'Tu montres quelque chose du doigt, la star hoche la tête',
+  'Photo souvenir, sourires un peu forcés',
+  'Vous vous penchez tous les deux vers le même objet',
+  'Un bras posé amicalement sur l\'épaule',
+  'Vous attendez, mains dans les poches, regard caméra',
+  'Tu expliques avec les mains, la star écoute poliment',
+]
 
-export function getDefaultScene(celebrityDomain: string): PhotoScene {
-  const s = getSceneSuggestions(celebrityDomain)
-  return {
-    location: s.locations[0],
-    outfits: s.outfits[0],
-    position: s.positions[0],
+/** Prompts libres complets — mêmes contraintes de rendu que les scènes guidées. */
+export const CUSTOM_PROMPT_EXAMPLES = [
+  'Dans une laverie automatique, panier à linge entre vous, jean et sneakers, photo souvenir un peu trop sérieuse.',
+  'Rayon canapés IKEA, vous êtes assis trop droits, tenues de tous les jours, regard caméra grave.',
+  'File du McDo, sacs kraft à la main, t-shirt et jean, vous attendez comme si de rien n\'était.',
+  'Caisse automatique du supermarché, un article refuse de passer, looks casual, tu expliques avec les mains.',
+  'Arrêt de bus vide, abri en plastique, sweat et baskets, debout côte à côte un peu trop sérieux.',
+  'Cuisine, pain grillé trop cuit, tenues de dimanche, vous vous penchez vers le grille-pain.',
+  'Parking de supermarché, caddie à côté, jean et sneakers, photo souvenir de colonie.',
+  'Terrasse de café en journée, deux tasses, veste légère, assis l\'un à côté de l\'autre.',
+  'Hall d\'immeuble, vous attendez l\'ascenseur, looks froissés, mains dans les poches.',
+  'Boulangerie, sacs de pain chaud, t-shirt et jean, tu montres la vitrine du doigt.',
+  'Salle d\'attente chez le médecin, magazines sur les genoux, tenues casual, un peu trop droits.',
+  'Aire d\'autoroute, table en plastique, sandwich triangle, photo souvenir forcée.',
+]
+
+export function pickN<T>(items: readonly T[], n: number, random: () => number = Math.random): T[] {
+  const copy = items.slice()
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1))
+    const current = copy[i]!
+    copy[i] = copy[j]!
+    copy[j] = current
   }
+  return copy.slice(0, Math.min(n, copy.length))
+}
+
+/** Tire un set de propositions — indépendant de la star, stable si on passe un RNG. */
+export function pickSceneSuggestions(
+  count = SCENE_SUGGESTION_COUNT,
+  random: () => number = Math.random,
+): SceneSuggestions {
+  return {
+    locations: pickN(SIMPLE_FUNNY_LOCATIONS, count, random),
+    outfits: pickN(SIMPLE_FUNNY_OUTFITS, count, random),
+    positions: pickN(SIMPLE_FUNNY_POSITIONS, count, random),
+  }
+}
+
+export function pickCustomPromptExamples(
+  count = SCENE_SUGGESTION_COUNT,
+  random: () => number = Math.random,
+): string[] {
+  return pickN(CUSTOM_PROMPT_EXAMPLES, count, random)
+}
+
+export function sceneFromSuggestions(suggestions: SceneSuggestions): PhotoScene {
+  return {
+    location: suggestions.locations[0] ?? '',
+    outfits: suggestions.outfits[0] ?? '',
+    position: suggestions.positions[0] ?? '',
+  }
+}
+
+/** Conservé pour compat : le métier de la star n'influence plus les propositions. */
+export function getSceneSuggestions(_celebrityDomain?: string): SceneSuggestions {
+  return pickSceneSuggestions()
+}
+
+export function getDefaultScene(_celebrityDomain?: string): PhotoScene {
+  return sceneFromSuggestions(pickSceneSuggestions())
 }
 
 /** Nettoie le texte utilisateur pour limiter les blocages du filtre kie.ai */
@@ -286,16 +276,17 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
       ? '- image_input[0] = Person A (USER). image_input[1] = Person B (CELEBRITY).'
       : '- image_input[0] = Person A (USER) — sole identity source for Person A.',
     'NON-NEGOTIABLE: copy faces from reference images. Do not invent, average, or beautify faces.',
+    'FACE COPY, NOT REDRAW: transplant the exact reference faces. A similar, prettier, or younger face is a FAIL.',
     'Exactly two people in the photo: Person A and Person B. No extra faces.',
     'PERSON A HARD LOCK:',
-    '- Same person as image_input[0]: bone structure, face width, jaw, eyes, nose, lips, skin, age, marks.',
+    '- 100% same face as image_input[0]: bone structure, face width, jaw, eyes, nose, lips, skin, age, marks.',
     '- HAIR LOCK: exact color, texture, length, volume, parting, hairline, style. Do not restyle to match the celebrity.',
-    '- Do not morph, blend, beautify, slim, puff, or average Person A with the celebrity.',
-    '- Allowed for Person A: pose, clothes (unless kept), hands, scene lighting on an UNCHANGED face and hair.',
+    '- ZERO FACE EDITS: no morph, blend, beautify, slim, puff, average, makeup or age change.',
+    '- Allowed: pose, clothes (unless kept), hands, body. Light may hit the face without reshaping it.',
     ...(dual
       ? [
           'PERSON B HARD LOCK:',
-          '- Copy face and hair from image_input[1] exactly. Do not invent a generic lookalike or a different celebrity.',
+          '- Copy face and hair from image_input[1] exactly. Same 100% lock and ZERO FACE EDITS as Person A.',
           '- Person B must be instantly recognizable as the same person as image_input[1]. Clothes from image_input[1] are NOT locked — dress for the scene.',
           'FAIL if either face is not instantly the same person, if Person A hair/face width drifted, or if Person B keeps iconic clothes when the scene is casual.',
         ]
@@ -311,9 +302,9 @@ function facePreservationClosingBlock(hasCelebrityReferenceImage: boolean): stri
   return [
     'FINAL IDENTITY CHECK (before output):',
     dual
-      ? '- Person A must match image_input[0] and Person B must match image_input[1]. If either face drifted, regenerate internally until both match.'
+      ? '- Person A must match image_input[0] and Person B must match image_input[1] at 100%. If either face drifted, regenerate internally until both match.'
       : '- Person A must match image_input[0] exactly. Person B must look like a distinct celebrity, not a morph of Person A.',
-    '- Reject any result where faces look AI-smoothed, swapped, averaged, or younger/prettier than the references.',
+    '- Reject any result where faces look AI-smoothed, swapped, averaged, redrawn, or younger/prettier than the references.',
   ]
 }
 
@@ -324,17 +315,17 @@ function photorealismBlock(celebrityName: string): string[] {
     'PHOTOREALISM — amateur smartphone snap (after face locks):',
     `Ordinary phone-gallery photo with ${celeb}: candid, slightly soft, not studio, glamour, influencer, editorial, CGI, or a polished composite.`,
     'No beauty filter, no AI-smooth skin, no porcelain/waxy/plastic finish, no airbrush. Skin must look like unretouched real skin — that ordinary texture is what makes the photo beautiful and believable.',
-    'Natural non-distinctive imperfections only: visible pores, slight uneven tone, subtle under-eye texture, fine lines, facial asymmetry. Do not invent new moles, scars, or distinctive marks. Realistic hair. Slight grain, compression, imperfect candid framing.',
+    'KEEP each reference face\'s real skin: visible pores, uneven tone, under-eye texture, fine lines, facial asymmetry, existing marks. Do not invent new moles, scars, or distinctive marks. Do not swap in a generic smooth face. Realistic hair. Slight grain, compression, imperfect candid framing.',
     `BOTH people share the source photo's grain, softness, sharpness, noise, exposure, white balance and non-retouched skin. ${celeb} must never look smoother, cleaner, sharper, or more retouched than the user.`,
-    'Natural spontaneous expressions and body language. Follow the USER SCENE BRIEF literally.',
+    'Natural spontaneous expressions and body language — without changing who they are. Follow the USER SCENE BRIEF literally.',
   ]
 }
 
 function naturalMomentBlock(): string[] {
   return [
     'NATURAL MOMENT LOCK: the result must look like a genuine candid shared moment between two real people already together, not two subjects placed side by side.',
-    'Relaxed posture, subtle torso rotation, slight lean/head tilt, natural asymmetry, believable proximity. A slight lean-in or arm around shoulder/waist/back is allowed if it improves realism. Small pose tweaks OK for a believable instant.',
-    'Avoid stiff, static, symmetrical, overly frontal/centered, or cutout-next-to-user poses. Expressions unforced. Realism = photographic texture AND living human interaction.',
+    'Relaxed posture, subtle torso rotation, slight lean/head tilt, natural asymmetry, believable proximity. A slight lean-in or arm around shoulder/waist/back is allowed if it improves realism. Small BODY pose tweaks OK — never a face redesign.',
+    'Avoid stiff, static, symmetrical, overly frontal/centered, or cutout-next-to-user poses. Expressions unforced but identity-locked. Realism = photographic texture AND living interaction, SAME two faces as the references.',
   ]
 }
 
@@ -637,10 +628,3 @@ export function buildSafetyRetryPhotoPrompt(ctx: PhotoGenerationContext): string
   const prefix = 'SAFE RETRY — preserve both reference faces and the requested scene exactly; PG-13, fully clothed adults.\n\n'
   return clampKiePrompt(prefix + buildPhotoPrompt(ctx)).prompt
 }
-
-export const CUSTOM_PROMPT_EXAMPLES = [
-  'Victoire d\'escape room à 00:01, tenues chic froissées, tu brandis une clé géante en plastique, la star applaudit trop fort.',
-  'File du McDo drive à 2h du matin en smoking, plateau sur le toit de la voiture, regards caméra ultra sérieux.',
-  'Laverie automatique un mardi soir, panier à linge entre vous, sweats tour merch assortis, pose souvenir de colonie.',
-  'Cabine karaoke 2€, micro-brosse à dents, paillettes de scène + crocs, duo hors-ton assumé.',
-]

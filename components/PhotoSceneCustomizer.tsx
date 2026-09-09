@@ -12,7 +12,7 @@ import type {
   SceneSource,
 } from '@/lib/types'
 import { DEFAULT_CREATION_MODE } from '@/lib/types'
-import { CUSTOM_PROMPT_EXAMPLES, getDefaultScene, getSceneSuggestions } from '@/lib/scene-suggestions'
+import { pickCustomPromptExamples, pickSceneSuggestions, sceneFromSuggestions } from '@/lib/scene-suggestions'
 import { INTERACTION_OPTIONS } from '@/lib/interactions'
 import UserHeightField from './UserHeightField'
 import PhotoFormatPicker from './PhotoFormatPicker'
@@ -169,13 +169,14 @@ export default function PhotoSceneCustomizer({
   onSubmit,
   onNeedCredits,
 }: PhotoSceneCustomizerProps) {
-  const { name, celebrity_domain } = celebrity
-  const suggestions = getSceneSuggestions(celebrity_domain)
+  const { name } = celebrity
+  const [suggestions] = useState(() => pickSceneSuggestions())
+  const [promptExamples] = useState(() => pickCustomPromptExamples())
   const isPhotoEdit = creationMode === 'photo_edit'
   const [sceneSource, setSceneSource] = useState<SceneSource>(initialRequest?.sceneSource ?? 'invented')
   const [mode, setMode] = useState<PhotoGenerationMode>(initialRequest?.mode ?? 'presets')
   const [scene, setScene] = useState<PhotoScene>(
-    () => initialRequest?.photoScene ?? getDefaultScene(celebrity_domain)
+    () => initialRequest?.photoScene ?? sceneFromSuggestions(suggestions)
   )
   const [customPrompt, setCustomPrompt] = useState(initialRequest?.customPrompt ?? '')
   const [interaction, setInteraction] = useState<string | undefined>(initialRequest?.interaction)
@@ -446,7 +447,7 @@ export default function PhotoSceneCustomizer({
             <SceneField
               icon={MapPin}
               label="Le lieu"
-              hint="Où se passe la photo ? Pense à un endroit cohérent avec le monde de ta star."
+              hint="Un endroit du quotidien, simple et un peu drôle — plus c'est clair, plus la photo est fidèle."
               value={scene.location}
               suggestions={suggestions.locations}
               onChange={(v) => setScene((s) => ({ ...s, location: v }))}
@@ -478,13 +479,13 @@ export default function PhotoSceneCustomizer({
             </div>
             <p className="text-[#666] text-xs leading-relaxed">
               Décris librement la photo que tu veux : lieu, ambiance, tenues, pose, éclairage…
-              Sois précis pour de meilleurs résultats.
+              Sois précis pour de meilleurs résultats. Les idées ci-dessous changent à chaque visite.
             </p>
             <textarea
               value={customPrompt}
               onChange={(e) => setCustomPrompt(e.target.value)}
               rows={5}
-              placeholder={`Ex : Photo avec ${name} sur un tapis rouge à Cannes, tenues de gala, souriant aux photographes...`}
+              placeholder={`Ex : Dans une laverie avec ${name}, panier à linge entre vous, jean et sneakers, photo un peu trop sérieuse...`}
               className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder:text-[#555] resize-none outline-none transition-colors"
               style={{
                 background: 'rgba(255,255,255,0.04)',
@@ -497,7 +498,7 @@ export default function PhotoSceneCustomizer({
               Minimum 20 caractères · {customPrompt.trim().length} / 20
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {CUSTOM_PROMPT_EXAMPLES.map((example) => (
+              {promptExamples.map((example) => (
                 <button
                   key={example}
                   type="button"

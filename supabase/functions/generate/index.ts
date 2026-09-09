@@ -853,16 +853,17 @@ function facePreservationBlock(hasCelebrityReferenceImage: boolean): string[] {
       ? '- image_input[0] = Person A (USER). image_input[1] = Person B (CELEBRITY).'
       : '- image_input[0] = Person A (USER) — sole identity source for Person A.',
     'NON-NEGOTIABLE: copy faces from reference images. Do not invent, average, or beautify faces.',
+    'FACE COPY, NOT REDRAW: transplant the exact reference faces. A similar, prettier, or younger face is a FAIL.',
     'Exactly two people in the photo: Person A and Person B. No extra faces.',
     'PERSON A HARD LOCK:',
-    '- Same person as image_input[0]: bone structure, face width, jaw, eyes, nose, lips, skin, age, marks.',
+    '- 100% same face as image_input[0]: bone structure, face width, jaw, eyes, nose, lips, skin, age, marks.',
     '- HAIR LOCK: exact color, texture, length, volume, parting, hairline, style. Do not restyle to match the celebrity.',
-    '- Do not morph, blend, beautify, slim, puff, or average Person A with the celebrity.',
-    '- Allowed for Person A: pose, clothes (unless kept), hands, scene lighting on an UNCHANGED face and hair.',
+    '- ZERO FACE EDITS: no morph, blend, beautify, slim, puff, average, makeup or age change.',
+    '- Allowed: pose, clothes (unless kept), hands, body. Light may hit the face without reshaping it.',
     ...(dual
       ? [
           'PERSON B HARD LOCK:',
-          '- Copy face and hair from image_input[1] exactly. Do not invent a generic lookalike or a different celebrity.',
+          '- Copy face and hair from image_input[1] exactly. Same 100% lock and ZERO FACE EDITS as Person A.',
           '- Person B must be instantly recognizable as the same person as image_input[1]. Clothes from image_input[1] are NOT locked — dress for the scene.',
           'FAIL if either face is not instantly the same person, if Person A hair/face width drifted, or if Person B keeps iconic clothes when the scene is casual.',
         ]
@@ -878,9 +879,9 @@ function facePreservationClosingBlock(hasCelebrityReferenceImage: boolean): stri
   return [
     'FINAL IDENTITY CHECK (before output):',
     dual
-      ? '- Person A must match image_input[0] and Person B must match image_input[1]. If either face drifted, regenerate internally until both match.'
+      ? '- Person A must match image_input[0] and Person B must match image_input[1] at 100%. If either face drifted, regenerate internally until both match.'
       : '- Person A must match image_input[0] exactly. Person B must look like a distinct celebrity, not a morph of Person A.',
-    '- Reject any result where faces look AI-smoothed, swapped, averaged, or younger/prettier than the references.',
+    '- Reject any result where faces look AI-smoothed, swapped, averaged, redrawn, or younger/prettier than the references.',
   ]
 }
 
@@ -891,17 +892,17 @@ function photorealismBlock(celebrityName: string): string[] {
     'PHOTOREALISM — amateur smartphone snap (after face locks):',
     `Ordinary phone-gallery photo with ${celeb}: candid, slightly soft, not studio, glamour, influencer, editorial, CGI, or a polished composite.`,
     'No beauty filter, no AI-smooth skin, no porcelain/waxy/plastic finish, no airbrush. Skin must look like unretouched real skin — that ordinary texture is what makes the photo beautiful and believable.',
-    'Natural non-distinctive imperfections only: visible pores, slight uneven tone, subtle under-eye texture, fine lines, facial asymmetry. Do not invent new moles, scars, or distinctive marks. Realistic hair. Slight grain, compression, imperfect candid framing.',
+    'KEEP each reference face\'s real skin: visible pores, uneven tone, under-eye texture, fine lines, facial asymmetry, existing marks. Do not invent new moles, scars, or distinctive marks. Do not swap in a generic smooth face. Realistic hair. Slight grain, compression, imperfect candid framing.',
     `BOTH people share the source photo's grain, softness, sharpness, noise, exposure, white balance and non-retouched skin. ${celeb} must never look smoother, cleaner, sharper, or more retouched than the user.`,
-    'Natural spontaneous expressions and body language. Follow the USER SCENE BRIEF literally.',
+    'Natural spontaneous expressions and body language — without changing who they are. Follow the USER SCENE BRIEF literally.',
   ]
 }
 
 function naturalMomentBlock(): string[] {
   return [
     'NATURAL MOMENT LOCK: the result must look like a genuine candid shared moment between two real people already together, not two subjects placed side by side.',
-    'Relaxed posture, subtle torso rotation, slight lean/head tilt, natural asymmetry, believable proximity. A slight lean-in or arm around shoulder/waist/back is allowed if it improves realism. Small pose tweaks OK for a believable instant.',
-    'Avoid stiff, static, symmetrical, overly frontal/centered, or cutout-next-to-user poses. Expressions unforced. Realism = photographic texture AND living human interaction.',
+    'Relaxed posture, subtle torso rotation, slight lean/head tilt, natural asymmetry, believable proximity. A slight lean-in or arm around shoulder/waist/back is allowed if it improves realism. Small BODY pose tweaks OK — never a face redesign.',
+    'Avoid stiff, static, symmetrical, overly frontal/centered, or cutout-next-to-user poses. Expressions unforced but identity-locked. Realism = photographic texture AND living interaction, SAME two faces as the references.',
   ]
 }
 

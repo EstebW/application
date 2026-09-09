@@ -104,6 +104,18 @@ describe('longueur des prompts KIE', () => {
     assert.match(raw, /USER SCENE BRIEF/)
   })
 
+  it('full_generation copie les visages à 100% sans lisser la peau', () => {
+    const raw = buildFullGenerationPrompt(worstFullGen)
+    assert.match(raw, /FACE COPY, NOT REDRAW/)
+    assert.match(raw, /ZERO FACE EDITS/)
+    assert.match(raw, /KEEP each reference face's real skin/)
+    assert.match(raw, /No beauty filter, no AI-smooth skin/)
+    assert.match(raw, /never a face redesign/)
+    assert.match(raw, /visible pores/)
+    assert.doesNotMatch(raw, /non-distinctive imperfections only/)
+    assert.ok(raw.length <= KIE_PROMPT_MAX_CHARS, `full_generation ${raw.length} > ${KIE_PROMPT_MAX_CHARS}`)
+  })
+
   it('reste sous la limite pour full_generation avec scène guidée', () => {
     const prompt = buildPhotoPrompt(worstFullGen)
     assert.ok(prompt.length <= KIE_PROMPT_MAX_CHARS, `full_generation ${prompt.length} > ${KIE_PROMPT_MAX_CHARS}`)
